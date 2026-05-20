@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fetchOpenings, getRootNames, buildTheoryDB, filterDB } from './data/lichess'
+import { fetchOpenings, getRootNames, buildTheoryDB, filterDB, filterToMainLines } from './data/lichess'
 import { PRESETS } from './data/presets'
 import { Trainer } from './components/Trainer'
 import { Profile } from './components/Profile'
@@ -29,6 +29,7 @@ export default function App() {
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [deck, setDeck]           = useState<Deck>(loadDeck)
   const [deckMode, setDeckMode]   = useState(false)
+  const [mainLineOnly, setMainLineOnly] = useState(false)
   const [deckProgress, setDeckProgress] = useState<{ index: number; total: number } | null>(null)
   const lastDrawnRef              = useRef('')
   const sessionQueueRef           = useRef<string[]>([])
@@ -55,10 +56,11 @@ export default function App() {
     [openings, selectedRoot, minMoves],
   )
   const baseDB = dbOverride ?? lichessDB
-  const db = useMemo(
-    () => filterDB(baseDB, exclusions[selectedRoot] ?? []),
-    [baseDB, exclusions, selectedRoot],
-  )
+  const db = useMemo(() => {
+    let result = filterDB(baseDB, exclusions[selectedRoot] ?? [])
+    if (deckMode && mainLineOnly) result = filterToMainLines(result)
+    return result
+  }, [baseDB, exclusions, selectedRoot, deckMode, mainLineOnly])
 
   function beginSession(opening: string, overrideDB: TheoryDB | null, inDeck = false) {
     setSelectedRoot(opening)
@@ -150,6 +152,8 @@ export default function App() {
         onBack={() => setScreen('setup')}
         onRemove={(name) => setDeck((d) => removeFromDeck(d, name))}
         onSetSide={setSide}
+        mainLineOnly={mainLineOnly}
+        onSetMainLineOnly={setMainLineOnly}
         onStart={(filtered) => startDeckSession(filtered)}
       />
     )

@@ -64,6 +64,15 @@ export function filterDB(db: TheoryDB, excluded: string[]): TheoryDB {
   return result
 }
 
+export function filterToMainLines(db: TheoryDB): TheoryDB {
+  const result: TheoryDB = {}
+  for (const [fen, node] of Object.entries(db)) {
+    const moves = node.moves.filter((m) => m.variation.toLowerCase().includes('main line'))
+    if (moves.length > 0) result[fen] = { ...node, moves }
+  }
+  return result
+}
+
 export function buildTheoryDB(openings: Opening[], rootName: string, minMoves = 0): TheoryDB {
   const relevant = openings.filter(
     (o) =>

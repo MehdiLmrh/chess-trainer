@@ -15,13 +15,15 @@ interface Props {
   deck: Deck
   side: Side
   statsDB: StatsDB
+  mainLineOnly: boolean
   onBack: () => void
   onRemove: (opening: string) => void
   onSetSide: (side: Side) => void
+  onSetMainLineOnly: (v: boolean) => void
   onStart: (filtered: Deck) => void
 }
 
-export function DeckScreen({ deck, side, statsDB, onBack, onRemove, onSetSide, onStart }: Props) {
+export function DeckScreen({ deck, side, statsDB, mainLineOnly, onBack, onRemove, onSetSide, onSetMainLineOnly, onStart }: Props) {
   const [maxPerfect, setMaxPerfect] = useState<number>(Infinity)
 
   const filtered = deck.filter((name) => (statsDB[name]?.perfect ?? 0) < maxPerfect)
@@ -50,6 +52,22 @@ export function DeckScreen({ deck, side, statsDB, onBack, onRemove, onSetSide, o
                 {f.label}
               </button>
             ))}
+          </div>
+
+          <div className="deck-filter">
+            <span className="deck-filter-label">Lines:</span>
+            <button
+              className={`deck-filter-btn${!mainLineOnly ? ' active' : ''}`}
+              onClick={() => onSetMainLineOnly(false)}
+            >
+              All
+            </button>
+            <button
+              className={`deck-filter-btn${mainLineOnly ? ' active' : ''}`}
+              onClick={() => onSetMainLineOnly(true)}
+            >
+              Main line only
+            </button>
           </div>
 
           <ul className="deck-list">
