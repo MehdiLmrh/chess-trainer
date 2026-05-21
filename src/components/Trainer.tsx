@@ -37,7 +37,7 @@ export function Trainer({
   onCorrect, onWrong, onEndOfTheory,
   onExclude, onReset, onBack, onNext,
 }: Props) {
-  const { fen, feedback, variationName, hintSquares, onUserMove, revealAnswer } = useTrainer(
+  const { fen, feedback, variationName, hintMoves, onUserMove, revealAnswer } = useTrainer(
     db, side, { onCorrect, onWrong, onEndOfTheory },
   )
 
@@ -78,12 +78,11 @@ export function Trainer({
             animationDurationInMs: 200,
             onPieceDrop: ({ sourceSquare, targetSquare }) =>
               targetSquare ? onUserMove(sourceSquare, targetSquare) : false,
-            squareStyles: hintSquares
-              ? {
-                  [hintSquares.from]: { background: 'rgba(124,131,253,0.5)' },
-                  [hintSquares.to]: { background: 'rgba(124,131,253,0.8)' },
-                }
-              : {},
+            arrows: hintMoves.map((h) => ({
+              startSquare: h.from,
+              endSquare: h.to,
+              color: 'rgba(124,131,253,0.8)',
+            })),
           }}
         />
       </div>

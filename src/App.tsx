@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fetchOpenings, getRootNames, buildTheoryDB, filterDB, filterToMainLines } from './data/lichess'
+import { fetchOpenings, getRootNames, buildTheoryDB, filterDB, getCleanupStats, type CleanupStats } from './data/lichess'
 import { PRESETS } from './data/presets'
 import { Trainer } from './components/Trainer'
 import { Profile } from './components/Profile'
@@ -16,8 +16,9 @@ type Screen = 'setup' | 'trainer' | 'profile' | 'explorer' | 'deck'
 
 export default function App() {
   const [screen, setScreen]       = useState<Screen>('setup')
-  const [openings, setOpenings]   = useState<Opening[]>([])
-  const [loadError, setLoadError] = useState('')
+  const [openings, setOpenings]       = useState<Opening[]>([])
+  const [cleanupStats, setCleanupStats] = useState<CleanupStats | null>(null)
+  const [loadError, setLoadError]     = useState('')
   const [search, setSearch]       = useState('')
   const [selectedRoot, setSelectedRoot] = useState('')
   const [dbOverride, setDbOverride]     = useState<TheoryDB | null>(null)
@@ -39,7 +40,7 @@ export default function App() {
 
   useEffect(() => {
     fetchOpenings()
-      .then(setOpenings)
+      .then((o) => { setOpenings(o); setCleanupStats(getCleanupStats()) })
       .catch(() => setLoadError('Failed to load openings. Check your connection.'))
   }, [])
 
@@ -52,15 +53,17 @@ export default function App() {
     [rootNames, search],
   )
   const lichessDB = useMemo(
-    () => (selectedRoot && openings.length ? buildTheoryDB(openings, selectedRoot, minMoves) : {}),
-    [openings, selectedRoot, minMoves],
+    () =>
+      selectedRoot && openings.length
+        ? buildTheoryDB(openings, selectedRoot, minMoves, deckMode && mainLineOnly)
+        : {},
+    [openings, selectedRoot, minMoves, deckMode, mainLineOnly],
   )
   const baseDB = dbOverride ?? lichessDB
-  const db = useMemo(() => {
-    let result = filterDB(baseDB, exclusions[selectedRoot] ?? [])
-    if (deckMode && mainLineOnly) result = filterToMainLines(result)
-    return result
-  }, [baseDB, exclusions, selectedRoot, deckMode, mainLineOnly])
+  const db = useMemo(
+    () => filterDB(baseDB, exclusions[selectedRoot] ?? []),
+    [baseDB, exclusions, selectedRoot],
+  )
 
   function beginSession(opening: string, overrideDB: TheoryDB | null, inDeck = false) {
     setSelectedRoot(opening)
@@ -136,6 +139,7 @@ export default function App() {
         openings={openings}
         statsDB={statsDB}
         deck={deck}
+        cleanupStats={cleanupStats}
         onToggleDeck={handleToggleDeck}
         onBack={() => setScreen('setup')}
         onTrain={(rootName) => beginSession(rootName, null)}

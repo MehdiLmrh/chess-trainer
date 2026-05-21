@@ -684,3 +684,52 @@
   color: #e74c3c;
   border-color: #e74c3c;
 }
+
+/* ── DB cleanup stats ─────────────────────────── */
+
+.db-stats {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #2a2a44;
+}
+
+.db-stats-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 0.75rem;
+}
+
+.db-stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.db-stats-table td {
+  padding: 0.35rem 0.1rem;
+  color: #888;
+  border-bottom: 1px solid #1e1e38;
+}
+
+.db-stats-table tr:last-child td {
+  border-bottom: none;
+}
+
+.db-stats-val {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: #c0c0d0;
+  width: 4rem;
+}
+
+.db-stats-removed { color: #e74c3c; }
+.db-stats-grouped { color: #7c83fd; }
+
+.db-stats-hint {
+  font-size: 0.78rem;
+  color: #444;
+}

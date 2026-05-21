@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Chess } from 'chess.js'
 import { Chessboard } from 'react-chessboard'
-import { pgnLength, type Opening } from '../data/lichess'
+import { pgnLength, type Opening, type CleanupStats } from '../data/lichess'
 import { starLevel, type StatsDB } from '../stats'
 import { Stars } from './Stars'
 import type { Deck } from '../deck'
@@ -71,12 +71,13 @@ interface Props {
   openings: Opening[]
   statsDB: StatsDB
   deck: Deck
+  cleanupStats: CleanupStats | null
   onToggleDeck: (rootName: string) => void
   onBack: () => void
   onTrain: (rootName: string) => void
 }
 
-export function Explorer({ openings, statsDB, deck, onToggleDeck, onBack, onTrain }: Props) {
+export function Explorer({ openings, statsDB, deck, cleanupStats, onToggleDeck, onBack, onTrain }: Props) {
   const [search, setSearch]     = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [preview, setPreview]   = useState<Preview | null>(null)
@@ -196,6 +197,32 @@ export function Explorer({ openings, statsDB, deck, onToggleDeck, onBack, onTrai
           <Chessboard
             options={{ position: preview.fen, boardOrientation: 'white', animationDurationInMs: 0 }}
           />
+        </div>
+      )}
+
+      {cleanupStats && (
+        <div className="db-stats">
+          <h3 className="db-stats-title">Database cleanup</h3>
+          <table className="db-stats-table">
+            <tbody>
+              <tr>
+                <td>Raw entries</td>
+                <td className="db-stats-val">{cleanupStats.totalBefore.toLocaleString()}</td>
+              </tr>
+              <tr>
+                <td>After cleanup</td>
+                <td className="db-stats-val">{cleanupStats.totalAfter.toLocaleString()}</td>
+              </tr>
+              <tr>
+                <td>Prefix duplicates removed</td>
+                <td className="db-stats-val db-stats-removed">−{cleanupStats.prefixRemoved}</td>
+              </tr>
+              <tr>
+                <td>Final-move groups <span className="db-stats-hint">(shown as arrows)</span></td>
+                <td className="db-stats-val db-stats-grouped">{cleanupStats.finalMoveGroups}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       )}
     </div>

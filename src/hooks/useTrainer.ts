@@ -2,10 +2,37 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Chess } from 'chess.js'
 import type { TheoryDB, Side, FeedbackStatus } from '../types'
 
+export interface HintMove { from: string; to: string }
+
 interface TrainerCallbacks {
   onCorrect?: () => void
   onWrong?: () => void
   onEndOfTheory?: (isPerfect: boolean, variation: string) => void
+}
+
+// Returns arrows for all valid moves when every child position is end-of-theory.
+// This surfaces all legal final moves simultaneously so the user can see all options.
+function getFinalMoveArrows(fen: string, db: TheoryDB): HintMove[] {
+  const node = db[fen]
+  if (!node || node.moves.length < 2) return []
+
+  const allLeaf = node.moves.every((m) => {
+    const t = new Chess(fen)
+    try {
+      t.move(m.move)
+      const child = db[t.fen()]
+      return !child || child.moves.length === 0
+    } catch {
+      return false
+    }
+  })
+  if (!allLeaf) return []
+
+  return node.moves.flatMap((m) => {
+    const t = new Chess(fen)
+    const r = t.move(m.move)
+    return r ? [{ from: r.from, to: r.to }] : []
+  })
 }
 
 export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks = {}) {
@@ -14,7 +41,7 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
   const [feedback, setFeedback] = useState<FeedbackStatus>('idle')
   const [variationName, setVariationName] = useState('')
   const variationNameRef = useRef('')
-  const [hintSquares, setHintSquares] = useState<{ from: string; to: string } | null>(null)
+  const [hintMoves, setHintMoves] = useState<HintMove[]>([])
   const sessionWrongsRef = useRef(0)
   const appColor = side === 'white' ? 'b' : 'w'
 
@@ -35,18 +62,17 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
     setFen(newFen)
     variationNameRef.current = picked.variation
     setVariationName(picked.variation)
-    setHintSquares(null)
 
     const nextNode = db[newFen]
     if (!nextNode || nextNode.moves.length === 0) {
+      setHintMoves([])
       setFeedback('end-of-theory')
       onEndOfTheory?.(sessionWrongsRef.current === 0, picked.variation)
+    } else {
+      setHintMoves(getFinalMoveArrows(newFen, db))
     }
   }, [db, onEndOfTheory])
 
-  // Play the app's opening move once on mount.
-  // The parent remounts this component (via key) for each new session,
-  // so this always fires exactly once per session.
   useEffect(() => {
     if (chess.current.turn() !== appColor) return
     const timer = setTimeout(playAppMove, 300)
@@ -91,7 +117,7 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
       setVariationName(matched.variation)
       setFen(afterFen)
       setFeedback('correct')
-      setHintSquares(null)
+      setHintMoves([])
       onCorrect?.()
 
       setTimeout(() => {
@@ -114,7 +140,7 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
     const moveResult = test.move(picked.move)
     if (!moveResult) return
 
-    setHintSquares({ from: moveResult.from, to: moveResult.to })
+    setHintMoves([{ from: moveResult.from, to: moveResult.to }])
     setFeedback('idle')
 
     setTimeout(() => {
@@ -122,11 +148,11 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
       const newFen = chess.current.fen()
       setFen(newFen)
       setVariationName(picked.variation)
-      setHintSquares(null)
+      setHintMoves([])
       setFeedback('idle')
       setTimeout(() => playAppMove(), 600)
     }, 1000)
   }, [db, playAppMove])
 
-  return { fen, feedback, variationName, hintSquares, onUserMove, revealAnswer }
+  return { fen, feedback, variationName, hintMoves, onUserMove, revealAnswer }
 }
