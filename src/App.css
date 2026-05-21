@@ -214,6 +214,28 @@
   color: #555;
 }
 
+.tree-leaf {
+  cursor: pointer;
+  flex-wrap: wrap;
+}
+
+.tree-leaf-selected {
+  background: #16163a;
+}
+
+.tree-leaf-pgn {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.4rem 0.6rem;
+  background: #0c0c20;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: #9090c0;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
 .stars {
   font-size: 0.85rem;
   letter-spacing: 0.05em;

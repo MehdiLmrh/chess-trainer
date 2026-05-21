@@ -10,15 +10,22 @@ import type { Deck } from '../deck'
 
 interface VarItem {
   eco: string
-  name: string
+  name: string       // display label
   pgn: string
   moveCount: number
+  statsKey: string   // key into StatsDB
 }
 
 interface RootItem {
   name: string
   eco: string
   variations: VarItem[]
+}
+
+// For flat openings (no colon), use the last 2 half-moves as a short label.
+function flatLabel(pgn: string): string {
+  const moves = pgn.replace(/\d+\.\s*/g, '').trim().split(/\s+/).filter(Boolean)
+  return '…' + moves.slice(-2).join(' ')
 }
 
 function buildTree(openings: Opening[]): RootItem[] {
@@ -31,8 +38,22 @@ function buildTree(openings: Opening[]): RootItem[] {
     const node = map.get(rootName)!
     if (!varName) {
       node.eco = o.eco
+      // Flat entry: add as a variation so it's visible and trainable
+      node.variations.push({
+        eco: o.eco,
+        name: flatLabel(o.pgn),
+        pgn: o.pgn,
+        moveCount: pgnLength(o.pgn),
+        statsKey: rootName,
+      })
     } else {
-      node.variations.push({ eco: o.eco, name: varName, pgn: o.pgn, moveCount: pgnLength(o.pgn) })
+      node.variations.push({
+        eco: o.eco,
+        name: varName,
+        pgn: o.pgn,
+        moveCount: pgnLength(o.pgn),
+        statsKey: rootName + ': ' + varName,
+      })
     }
   }
   return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name))
@@ -57,7 +78,7 @@ import type { StarLevel } from '../stats'
 
 function rootStarLevel(root: RootItem, statsDB: StatsDB): StarLevel {
   if (root.variations.length === 0) return starLevel(statsDB[root.name])
-  const all = root.variations.map((v) => statsDB[root.name + ': ' + v.name])
+  const all = root.variations.map((v) => statsDB[v.statsKey])
   if (!all.every((s) => s && s.completed >= 1)) return 'none'
   if (!all.every((s) => s && s.perfect >= 1))  return 'empty'
   if (!all.every((s) => s && s.perfect >= 5))  return 'gold1'
@@ -79,8 +100,11 @@ interface Props {
 
 export function Explorer({ openings, statsDB, deck, cleanupStats, onToggleDeck, onBack, onTrain }: Props) {
   const [search, setSearch]     = useState('')
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  // openState tracks explicit open/closed overrides per node.
+  // Default when no search: closed. Default when searching: open.
+  const [openState, setOpenState] = useState<Record<string, boolean>>({})
   const [preview, setPreview]   = useState<Preview | null>(null)
+  const [selectedVar, setSelectedVar] = useState<string | null>(null)
 
   const tree = useMemo(() => buildTree(openings), [openings])
   const q    = search.toLowerCase().trim()
@@ -99,11 +123,9 @@ export function Explorer({ openings, statsDB, deck, cleanupStats, onToggleDeck, 
   }, [tree, q])
 
   function toggle(name: string) {
-    setExpanded((prev) => {
-      const s = new Set(prev)
-      s.has(name) ? s.delete(name) : s.add(name)
-      return s
-    })
+    const defaultOpen = q.length > 0
+    const current = openState[name] ?? defaultOpen
+    setOpenState((prev) => ({ ...prev, [name]: !current }))
   }
 
   function showPreview(e: React.MouseEvent<HTMLLIElement>, pgn: string) {
@@ -134,9 +156,9 @@ export function Explorer({ openings, statsDB, deck, cleanupStats, onToggleDeck, 
       <div className="explorer-tree">
         {visible.length === 0 && <p className="explorer-empty">No openings match.</p>}
         {visible.map(({ root, vars }) => {
-          const isOpen   = q.length > 0 || expanded.has(root.name)
-          const rLevel   = rootStarLevel(root, statsDB)
-          const inDeck   = deck.includes(root.name)
+          const isOpen = openState[root.name] ?? (q.length > 0)
+          const rLevel = rootStarLevel(root, statsDB)
+          const inDeck = deck.includes(root.name)
           return (
             <div key={root.name} className="tree-node">
               <div className="tree-root-row" onClick={() => toggle(root.name)}>
@@ -165,13 +187,19 @@ export function Explorer({ openings, statsDB, deck, cleanupStats, onToggleDeck, 
               {isOpen && vars.length > 0 && (
                 <ul className="tree-children">
                   {vars.map((v) => {
-                    const vLevel = starLevel(statsDB[root.name + ': ' + v.name])
+                    const vLevel = starLevel(statsDB[v.statsKey])
+                    const key = v.eco + v.name
+                    const isSelected = selectedVar === key
                     return (
                       <li
-                        key={v.eco + v.name}
-                        className="tree-leaf"
-                        onMouseEnter={(e) => showPreview(e, v.pgn)}
+                        key={key}
+                        className={`tree-leaf${isSelected ? ' tree-leaf-selected' : ''}`}
+                        onMouseEnter={(e) => { if (!isSelected) showPreview(e, v.pgn) }}
                         onMouseLeave={() => setPreview(null)}
+                        onClick={() => {
+                          setPreview(null)
+                          setSelectedVar(isSelected ? null : key)
+                        }}
                       >
                         <span className="tree-leaf-name">{v.name}</span>
                         <Stars level={vLevel} />
@@ -179,6 +207,9 @@ export function Explorer({ openings, statsDB, deck, cleanupStats, onToggleDeck, 
                           <span className="tree-eco">{v.eco}</span>
                           <span className="tree-ply">{v.moveCount} ply</span>
                         </span>
+                        {isSelected && (
+                          <span className="tree-leaf-pgn">{v.pgn}</span>
+                        )}
                       </li>
                     )
                   })}

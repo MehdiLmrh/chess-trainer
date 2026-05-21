@@ -1,4 +1,7 @@
+import { useState } from 'react'
+import { Chess } from 'chess.js'
 import { Chessboard } from 'react-chessboard'
+import type { SquareHandlerArgs } from 'react-chessboard/dist/types'
 import { useTrainer } from '../hooks/useTrainer'
 import type { TheoryDB, Side } from '../types'
 
@@ -41,6 +44,72 @@ export function Trainer({
     db, side, { onCorrect, onWrong, onEndOfTheory },
   )
 
+  const [selectedSquare, setSelectedSquare] = useState<string | null>(null)
+  const [moveTargets, setMoveTargets] = useState<{ empty: string[]; capture: string[] }>({ empty: [], capture: [] })
+
+  const userColor = side === 'white' ? 'w' : 'b'
+
+  function selectSquare(square: string) {
+    const chess = new Chess(fen)
+    const moves = chess.moves({ square: square as Parameters<typeof chess.moves>[0]['square'], verbose: true })
+    const empty: string[] = []
+    const capture: string[] = []
+    for (const m of moves) {
+      if (m.flags.includes('c') || m.flags.includes('e')) capture.push(m.to)
+      else empty.push(m.to)
+    }
+    setSelectedSquare(square)
+    setMoveTargets({ empty, capture })
+  }
+
+  function clearSelection() {
+    setSelectedSquare(null)
+    setMoveTargets({ empty: [], capture: [] })
+  }
+
+  function handleSquareClick({ square, piece }: SquareHandlerArgs) {
+    if (feedback === 'end-of-theory') return
+
+    const pieceColor = piece?.pieceType[0]  // 'w' or 'b'
+    const allTargets = [...moveTargets.empty, ...moveTargets.capture]
+
+    if (selectedSquare) {
+      if (allTargets.includes(square)) {
+        onUserMove(selectedSquare, square)
+        clearSelection()
+        return
+      }
+      if (pieceColor === userColor) {
+        selectSquare(square)
+        return
+      }
+      clearSelection()
+      return
+    }
+
+    if (pieceColor === userColor) {
+      selectSquare(square)
+    }
+  }
+
+  // Build squareStyles: selected square highlight + dots/rings for targets
+  const squareStyles: Record<string, React.CSSProperties> = {}
+  if (selectedSquare) {
+    squareStyles[selectedSquare] = { background: 'rgba(124,131,253,0.35)' }
+  }
+  for (const sq of moveTargets.empty) {
+    squareStyles[sq] = {
+      background: 'radial-gradient(circle, rgba(124,131,253,0.45) 28%, transparent 29%)',
+      cursor: 'pointer',
+    }
+  }
+  for (const sq of moveTargets.capture) {
+    squareStyles[sq] = {
+      background: 'radial-gradient(circle, transparent 57%, rgba(124,131,253,0.5) 58%)',
+      cursor: 'pointer',
+    }
+  }
+
   const showVariation = variationName && variationName !== selectedRoot
   const canExclude = showVariation && feedback !== 'wrong' && feedback !== 'out-of-theory'
 
@@ -76,8 +145,12 @@ export function Trainer({
             position: fen,
             boardOrientation: side,
             animationDurationInMs: 200,
-            onPieceDrop: ({ sourceSquare, targetSquare }) =>
-              targetSquare ? onUserMove(sourceSquare, targetSquare) : false,
+            onPieceDrop: ({ sourceSquare, targetSquare }) => {
+              clearSelection()
+              return targetSquare ? onUserMove(sourceSquare, targetSquare) : false
+            },
+            onSquareClick: handleSquareClick,
+            squareStyles,
             arrows: hintMoves.map((h) => ({
               startSquare: h.from,
               endSquare: h.to,
