@@ -199,7 +199,7 @@ interface Props {
   deck: Deck
   customOpenings: CustomOpening[]
   cleanupStats: CleanupStats | null
-  onToggleDeck: (rootName: string) => void
+  onToggleDeck: (rootName: string, variations?: string[]) => void
   onBack: () => void
   onTrain: (rootName: string, allowedVariations?: Set<string>) => void
   onTrainCustom: (name: string, db: TheoryDB) => void
@@ -386,7 +386,7 @@ export function Explorer({
         {visible.map(({ root, vars }) => {
           const isOpen     = openState[root.name] ?? (q.length > 0)
           const rLevel     = rootStarLevel(root, statsDB)
-          const inDeck     = deck.includes(root.name)
+          const inDeck     = deck.some((e) => e.rootName === root.name)
           const checkedSet = checkedVars[root.name]
           const numChecked = checkedSet?.size ?? 0
           return (
@@ -402,7 +402,7 @@ export function Explorer({
                 <button
                   className={`tree-deck-btn${inDeck ? ' in-deck' : ''}`}
                   title={inDeck ? 'Remove from deck' : 'Add to deck'}
-                  onClick={(e) => { e.stopPropagation(); onToggleDeck(root.name) }}
+                  onClick={(e) => { e.stopPropagation(); onToggleDeck(root.name, numChecked > 0 ? Array.from(checkedSet) : undefined) }}
                 >{inDeck ? '✓' : '+'}</button>
                 <button
                   className="tree-train-btn"

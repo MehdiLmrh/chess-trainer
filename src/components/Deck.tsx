@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Stars } from './Stars'
 import { starLevel } from '../stats'
 import type { StatsDB } from '../stats'
-import type { Deck } from '../deck'
+import type { Deck, DeckEntry } from '../deck'
 import type { Side } from '../types'
 
 const FILTERS = [
@@ -20,13 +20,13 @@ interface Props {
   onRemove: (opening: string) => void
   onSetSide: (side: Side) => void
   onSetMainLineOnly: (v: boolean) => void
-  onStart: (filtered: Deck) => void
+  onStart: (filtered: DeckEntry[]) => void
 }
 
 export function DeckScreen({ deck, side, statsDB, mainLineOnly, onBack, onRemove, onSetSide, onSetMainLineOnly, onStart }: Props) {
   const [maxPerfect, setMaxPerfect] = useState<number>(Infinity)
 
-  const filtered = deck.filter((name) => (statsDB[name]?.perfect ?? 0) < maxPerfect)
+  const filtered = deck.filter((entry) => (statsDB[entry.rootName]?.perfect ?? 0) < maxPerfect)
 
   return (
     <div className="deck-screen">
@@ -71,16 +71,21 @@ export function DeckScreen({ deck, side, statsDB, mainLineOnly, onBack, onRemove
           </div>
 
           <ul className="deck-list">
-            {deck.map((name) => {
-              const excluded = (statsDB[name]?.perfect ?? 0) >= maxPerfect
+            {deck.map((entry) => {
+              const excluded = (statsDB[entry.rootName]?.perfect ?? 0) >= maxPerfect
               return (
-                <li key={name} className={`deck-item${excluded ? ' deck-item-excluded' : ''}`}>
-                  <span className="deck-item-name">{name}</span>
-                  <Stars level={starLevel(statsDB[name])} />
+                <li key={entry.rootName} className={`deck-item${excluded ? ' deck-item-excluded' : ''}`}>
+                  <span className="deck-item-name">{entry.rootName}</span>
+                  {entry.variations && (
+                    <span className="deck-item-vars" title={entry.variations.join('\n')}>
+                      {entry.variations.length} var{entry.variations.length !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                  <Stars level={starLevel(statsDB[entry.rootName])} />
                   <button
                     className="deck-remove-btn"
                     title="Remove from deck"
-                    onClick={() => onRemove(name)}
+                    onClick={() => onRemove(entry.rootName)}
                   >
                     ×
                   </button>

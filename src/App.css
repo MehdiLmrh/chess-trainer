@@ -696,6 +696,15 @@
   color: #e0e0e0;
 }
 
+.deck-item-vars {
+  font-size: 0.72rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid #383858;
+  border-radius: 10px;
+  color: #7c83fd;
+  white-space: nowrap;
+}
+
 .deck-remove-btn {
   padding: 0.1rem 0.45rem;
   border: 1px solid #444;

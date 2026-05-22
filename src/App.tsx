@@ -8,7 +8,7 @@ import { DeckScreen } from './components/Deck'
 import { Editor } from './components/Editor'
 import { loadStats, recordStart, recordCorrect, recordWrong, recordComplete, type StatsDB } from './stats'
 import { loadExclusions, addExclusion, removeExclusion, type ExclusionsDB } from './exclusions'
-import { loadDeck, addToDeck, removeFromDeck, buildSessionQueue, type Deck } from './deck'
+import { loadDeck, addToDeck, removeFromDeck, buildSessionQueue, type Deck, type DeckEntry } from './deck'
 import { loadCustomOpenings, type CustomOpening } from './customOpenings'
 import type { Opening } from './data/lichess'
 import type { Side, TheoryDB } from './types'
@@ -39,9 +39,9 @@ export default function App() {
   const [deckProgress, setDeckProgress] = useState<{ index: number; total: number } | null>(null)
   const [selectedVariations, setSelectedVariations] = useState<Set<string>>(new Set())
   const lastDrawnRef              = useRef('')
-  const sessionQueueRef           = useRef<string[]>([])
+  const sessionQueueRef           = useRef<DeckEntry[]>([])
   const sessionPosRef             = useRef(0)
-  const activeDeckRef             = useRef<string[]>([])
+  const activeDeckRef             = useRef<DeckEntry[]>([])
   const inputRef                  = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -97,16 +97,19 @@ export default function App() {
     setScreen('trainer')
   }
 
-  function advanceSession(queue: string[], pos: number) {
+  function advanceSession(queue: DeckEntry[], pos: number) {
     if (queue.length === 0) return
-    const opening = queue[pos]
+    const entry = queue[pos]
     sessionPosRef.current = pos + 1
     setDeckProgress({ index: pos + 1, total: queue.length })
-    lastDrawnRef.current = opening
-    beginSession(opening, null, true)
+    lastDrawnRef.current = entry.rootName
+    const overrideDB = entry.variations
+      ? buildTheoryDB(openings, entry.rootName, minMoves, false, new Set(entry.variations))
+      : null
+    beginSession(entry.rootName, overrideDB, true)
   }
 
-  function startDeckSession(filtered: string[]) {
+  function startDeckSession(filtered: DeckEntry[]) {
     activeDeckRef.current = filtered
     const queue = buildSessionQueue(filtered, statsDB)
     sessionQueueRef.current = queue
@@ -140,9 +143,11 @@ export default function App() {
     setExclusions((e) => removeExclusion(e, opening, variation))
   }
 
-  function handleToggleDeck(rootName: string) {
+  function handleToggleDeck(rootName: string, variations?: string[]) {
     setDeck((d) =>
-      d.includes(rootName) ? removeFromDeck(d, rootName) : addToDeck(d, rootName),
+      d.some((e) => e.rootName === rootName)
+        ? removeFromDeck(d, rootName)
+        : addToDeck(d, rootName, variations),
     )
   }
 
@@ -426,15 +431,18 @@ export default function App() {
             >
               Start Training
             </button>
-            {selectedRoot && (
-              <button
-                className={`deck-toggle-btn${deck.includes(selectedRoot) ? ' in-deck' : ''}`}
-                title={deck.includes(selectedRoot) ? 'Remove from deck' : 'Add to deck'}
-                onClick={() => handleToggleDeck(selectedRoot)}
-              >
-                {deck.includes(selectedRoot) ? '✓ Deck' : '+ Deck'}
-              </button>
-            )}
+            {selectedRoot && (() => {
+              const isInDeck = deck.some((e) => e.rootName === selectedRoot)
+              return (
+                <button
+                  className={`deck-toggle-btn${isInDeck ? ' in-deck' : ''}`}
+                  title={isInDeck ? 'Remove from deck' : 'Add to deck'}
+                  onClick={() => handleToggleDeck(selectedRoot)}
+                >
+                  {isInDeck ? '✓ Deck' : '+ Deck'}
+                </button>
+              )
+            })()}
           </div>
         </>
       )}
