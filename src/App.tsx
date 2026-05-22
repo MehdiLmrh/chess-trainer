@@ -172,6 +172,7 @@ export default function App() {
         key={editorInitialId ?? 'new'}
         side={side}
         onSetSide={setSide}
+        openings={openings}
         initialOpening={editorInitialId ? customOpenings.find((o) => o.id === editorInitialId) : null}
         onBack={() => {
           setEditorInitialId(null)

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Chess } from 'chess.js'
 import { Chessboard } from 'react-chessboard'
 import type { SquareHandlerArgs } from 'react-chessboard/dist/types'
@@ -6,6 +6,7 @@ import {
   loadCustomOpenings, saveCustomOpening, deleteCustomOpening,
   type CustomOpening,
 } from '../customOpenings'
+import type { Opening } from '../data/lichess'
 import type { TheoryDB, Side } from '../types'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -13,6 +14,10 @@ import type { TheoryDB, Side } from '../types'
 const START_FEN = new Chess().fen()
 
 interface PathStep { before: string; move: string; after: string }
+
+function parsePgn(pgn: string): string[] {
+  return pgn.replace(/\d+\.\s*/g, '').trim().split(/\s+/).filter(Boolean)
+}
 
 /** Re-tag every node in the DB with a new opening/variation name. */
 function retag(db: TheoryDB, name: string): TheoryDB {
@@ -31,11 +36,12 @@ interface Props {
   onBack: () => void
   onTrain: (name: string, db: TheoryDB) => void
   initialOpening?: CustomOpening | null
+  openings: Opening[]
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
 
-export function Editor({ side, onSetSide, onBack, onTrain, initialOpening }: Props) {
+export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openings }: Props) {
   const [name, setName]           = useState(() => initialOpening?.name ?? 'My Opening')
   const [db, setDb]               = useState<TheoryDB>(() => initialOpening?.db ?? {})
   const [path, setPath]           = useState<PathStep[]>([])
@@ -43,11 +49,38 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening }: Pro
   const [saved, setSaved]         = useState<CustomOpening[]>(loadCustomOpenings)
   const [editingId, setEditingId] = useState<string | null>(() => initialOpening?.id ?? null)
 
+  // Import panel
+  const [importOpen, setImportOpen]   = useState(false)
+  const [importSearch, setImportSearch] = useState('')
+
   // Click-to-move selection
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null)
   const [moveTargets, setMoveTargets]       = useState<{ empty: string[]; capture: string[] }>({ empty: [], capture: [] })
 
   const currentFen = path.length > 0 ? path[path.length - 1].after : START_FEN
+
+  // ── import search results ──────────────────────────────────────────────────
+
+  const importQuery = importSearch.toLowerCase().trim()
+
+  const importCustomResults = useMemo(
+    () => importQuery.length < 2
+      ? []
+      : saved.filter((o) => o.name.toLowerCase().includes(importQuery)),
+    [saved, importQuery],
+  )
+
+  const importLichessResults = useMemo(() => {
+    if (importQuery.length < 2) return []
+    // Deduplicate by name, keeping longest PGN
+    const seen = new Map<string, Opening>()
+    for (const o of openings) {
+      if (!o.name.toLowerCase().includes(importQuery)) continue
+      const ex = seen.get(o.name)
+      if (!ex || o.pgn.length > ex.pgn.length) seen.set(o.name, o)
+    }
+    return Array.from(seen.values()).slice(0, 15)
+  }, [openings, importQuery])
 
   // ── keyboard navigation ────────────────────────────────────────────────────
 
@@ -160,9 +193,45 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening }: Pro
       }
       return { ...prev, [fen]: { ...node, moves } }
     })
-    // If we navigated past this move, snap back
     const stepIdx = path.findIndex((s) => s.before === fen && s.move === moveSan)
     if (stepIdx >= 0) setPath((p) => p.slice(0, stepIdx))
+  }
+
+  // ── import helpers ─────────────────────────────────────────────────────────
+
+  function loadFromPgn(varName: string, pgn: string) {
+    const moves = parsePgn(pgn)
+    const chess = new Chess()
+    const newDb: TheoryDB = {}
+    const newPath: PathStep[] = []
+    for (const san of moves) {
+      const before = chess.fen()
+      if (!newDb[before]) newDb[before] = { opening: varName, moves: [] }
+      try { chess.move(san) } catch { break }
+      const after = chess.fen()
+      if (!newDb[before].moves.some((m) => m.move === san))
+        newDb[before].moves.push({ move: san, variation: varName })
+      newPath.push({ before, move: san, after })
+    }
+    // Strip "Root: " prefix for the editor name
+    const displayName = varName.includes(':') ? varName.split(':').slice(1).join(':').trim() : varName
+    setName(displayName)
+    setDb(newDb)
+    setPath(newPath)
+    setEditingId(null)
+    clearSel()
+    setImportOpen(false)
+    setImportSearch('')
+  }
+
+  function loadFromCustom(o: CustomOpening) {
+    setName(o.name)
+    setDb(o.db)
+    setPath([])
+    setEditingId(null)
+    clearSel()
+    setImportOpen(false)
+    setImportSearch('')
   }
 
   // ── save / load / new ─────────────────────────────────────────────────────
@@ -230,11 +299,52 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening }: Pro
           onChange={(e) => setName(e.target.value)}
         />
         <button
+          className={`editor-icon-btn${importOpen ? ' active' : ''}`}
+          title="Import from existing opening"
+          onClick={() => { setImportOpen((v) => !v); setImportSearch('') }}
+        >⤵ Import</button>
+        <button
           className="editor-icon-btn"
           title="Flip board"
           onClick={() => setOrientation((o) => (o === 'white' ? 'black' : 'white'))}
         >⇅ Flip</button>
       </div>
+
+      {/* Import panel */}
+      {importOpen && (
+        <div className="editor-import">
+          <input
+            className="editor-import-search"
+            type="text"
+            placeholder="Search opening or variation…"
+            value={importSearch}
+            onChange={(e) => setImportSearch(e.target.value)}
+            autoFocus
+          />
+          {importQuery.length >= 2 && (
+            <ul className="editor-import-results">
+              {importCustomResults.map((o) => (
+                <li key={o.id} className="editor-import-item" onClick={() => loadFromCustom(o)}>
+                  <span className="editor-import-name">{o.name}</span>
+                  <span className="editor-import-tag">custom</span>
+                </li>
+              ))}
+              {importLichessResults.map((o) => (
+                <li key={o.eco + o.name} className="editor-import-item" onClick={() => loadFromPgn(o.name, o.pgn)}>
+                  <span className="editor-import-name">{o.name}</span>
+                  <span className="editor-import-tag">{o.eco}</span>
+                </li>
+              ))}
+              {importCustomResults.length === 0 && importLichessResults.length === 0 && (
+                <li className="editor-import-empty">No results</li>
+              )}
+            </ul>
+          )}
+          {importQuery.length < 2 && (
+            <p className="editor-import-hint">Type at least 2 characters to search</p>
+          )}
+        </div>
+      )}
 
       {/* Board + panel */}
       <div className="editor-body">
