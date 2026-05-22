@@ -17,6 +17,11 @@ export interface CleanupStats {
 const FILES = ['a', 'b', 'c', 'd', 'e']
 const BASE = 'https://raw.githubusercontent.com/lichess-org/chess-openings/master'
 
+// Bump this when cleanOpenings logic changes to force a re-download.
+const CACHE_KEY = 'chess-trainer-openings-v1'
+
+interface CachedData { openings: Opening[]; stats: CleanupStats }
+
 let cached: Opening[] | null = null
 let _cleanupStats: CleanupStats | null = null
 
@@ -94,6 +99,18 @@ function cleanOpenings(openings: Opening[]): Opening[] {
 export async function fetchOpenings(): Promise<Opening[]> {
   if (cached) return cached
 
+  // Try localStorage first
+  try {
+    const stored = localStorage.getItem(CACHE_KEY)
+    if (stored) {
+      const { openings, stats } = JSON.parse(stored) as CachedData
+      cached = openings
+      _cleanupStats = stats
+      return cached
+    }
+  } catch { /* ignore parse errors */ }
+
+  // Download and clean
   const results = await Promise.all(
     FILES.map((f) => fetch(`${BASE}/${f}.tsv`).then((r) => r.text())),
   )
@@ -108,6 +125,13 @@ export async function fetchOpenings(): Promise<Opening[]> {
   }
 
   cached = cleanOpenings(raw)
+
+  // Persist to localStorage
+  try {
+    const data: CachedData = { openings: cached, stats: _cleanupStats! }
+    localStorage.setItem(CACHE_KEY, JSON.stringify(data))
+  } catch { /* quota exceeded or private browsing */ }
+
   return cached
 }
 
@@ -122,6 +146,19 @@ export function getRootNames(openings: Opening[], minMoves = 0): string[] {
       .map((o) => o.name.split(':')[0].trim()),
   )
   return Array.from(roots).sort()
+}
+
+export function getVariations(openings: Opening[], rootName: string, minMoves = 0): string[] {
+  const seen = new Set<string>()
+  for (const o of openings) {
+    if (
+      (o.name === rootName || o.name.startsWith(rootName + ':')) &&
+      pgnLength(o.pgn) >= minMoves
+    ) {
+      seen.add(o.name)
+    }
+  }
+  return Array.from(seen).sort()
 }
 
 export function filterDB(db: TheoryDB, excluded: string[]): TheoryDB {
@@ -140,12 +177,14 @@ export function buildTheoryDB(
   rootName: string,
   minMoves = 0,
   mainLineOnly = false,
+  allowedVariations?: Set<string>,
 ): TheoryDB {
   const relevant = openings.filter(
     (o) =>
       (o.name === rootName || o.name.startsWith(rootName + ':')) &&
       pgnLength(o.pgn) >= minMoves &&
-      (!mainLineOnly || o.name.toLowerCase().includes('main line')),
+      (!mainLineOnly || o.name.toLowerCase().includes('main line')) &&
+      (!allowedVariations || allowedVariations.has(o.name)),
   )
 
   const db: TheoryDB = {}

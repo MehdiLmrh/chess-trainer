@@ -1,18 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fetchOpenings, getRootNames, buildTheoryDB, filterDB, getCleanupStats, type CleanupStats } from './data/lichess'
+import { fetchOpenings, getRootNames, getVariations, buildTheoryDB, filterDB, getCleanupStats, type CleanupStats } from './data/lichess'
 import { PRESETS } from './data/presets'
 import { Trainer } from './components/Trainer'
 import { Profile } from './components/Profile'
 import { Explorer } from './components/Explorer'
 import { DeckScreen } from './components/Deck'
+import { Editor } from './components/Editor'
 import { loadStats, recordStart, recordCorrect, recordWrong, recordComplete, type StatsDB } from './stats'
 import { loadExclusions, addExclusion, removeExclusion, type ExclusionsDB } from './exclusions'
 import { loadDeck, addToDeck, removeFromDeck, buildSessionQueue, type Deck } from './deck'
+import { loadCustomOpenings, type CustomOpening } from './customOpenings'
 import type { Opening } from './data/lichess'
 import type { Side, TheoryDB } from './types'
 import './App.css'
 
-type Screen = 'setup' | 'trainer' | 'profile' | 'explorer' | 'deck'
+type Screen = 'setup' | 'trainer' | 'profile' | 'explorer' | 'deck' | 'editor'
 
 export default function App() {
   const [screen, setScreen]       = useState<Screen>('setup')
@@ -30,8 +32,12 @@ export default function App() {
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [deck, setDeck]           = useState<Deck>(loadDeck)
   const [deckMode, setDeckMode]   = useState(false)
+  const [customOpenings, setCustomOpenings] = useState<CustomOpening[]>(loadCustomOpenings)
+  const [editorInitialId, setEditorInitialId] = useState<string | null>(null)
+  const [editorReturnScreen, setEditorReturnScreen] = useState<Screen>('setup')
   const [mainLineOnly, setMainLineOnly] = useState(false)
   const [deckProgress, setDeckProgress] = useState<{ index: number; total: number } | null>(null)
+  const [selectedVariations, setSelectedVariations] = useState<Set<string>>(new Set())
   const lastDrawnRef              = useRef('')
   const sessionQueueRef           = useRef<string[]>([])
   const sessionPosRef             = useRef(0)
@@ -52,12 +58,29 @@ export default function App() {
         : rootNames.filter((n) => n.toLowerCase().includes(search.toLowerCase())).slice(0, 10),
     [rootNames, search],
   )
+  const allVariations = useMemo(
+    () => (selectedRoot && openings.length ? getVariations(openings, selectedRoot, minMoves) : []),
+    [openings, selectedRoot, minMoves],
+  )
+
+  useEffect(() => {
+    setSelectedVariations(new Set(allVariations))
+  }, [allVariations])
+
   const lichessDB = useMemo(
     () =>
       selectedRoot && openings.length
-        ? buildTheoryDB(openings, selectedRoot, minMoves, deckMode && mainLineOnly)
+        ? buildTheoryDB(
+            openings,
+            selectedRoot,
+            minMoves,
+            deckMode && mainLineOnly,
+            !deckMode && selectedVariations.size < allVariations.length
+              ? selectedVariations
+              : undefined,
+          )
         : {},
-    [openings, selectedRoot, minMoves, deckMode, mainLineOnly],
+    [openings, selectedRoot, minMoves, deckMode, mainLineOnly, selectedVariations, allVariations],
   )
   const baseDB = dbOverride ?? lichessDB
   const db = useMemo(
@@ -123,15 +146,37 @@ export default function App() {
     )
   }
 
-  const navBtns = screen !== 'profile' && screen !== 'explorer' && screen !== 'deck' && (
+  const navBtns = screen !== 'profile' && screen !== 'explorer' && screen !== 'deck' && screen !== 'editor' && (
     <div className="nav-btns">
       <button className="nav-btn" onClick={() => setScreen('deck')}>
         Deck{deck.length > 0 ? ` (${deck.length})` : ''}
       </button>
       <button className="nav-btn" onClick={() => setScreen('explorer')}>Explorer</button>
+      <button className="nav-btn" onClick={() => {
+        setEditorInitialId(null)
+        setEditorReturnScreen('setup')
+        setScreen('editor')
+      }}>Editor</button>
       <button className="nav-btn" onClick={() => setScreen('profile')}>Profile</button>
     </div>
   )
+
+  if (screen === 'editor') {
+    return (
+      <Editor
+        key={editorInitialId ?? 'new'}
+        side={side}
+        onSetSide={setSide}
+        initialOpening={editorInitialId ? customOpenings.find((o) => o.id === editorInitialId) : null}
+        onBack={() => {
+          setEditorInitialId(null)
+          setCustomOpenings(loadCustomOpenings())
+          setScreen(editorReturnScreen)
+        }}
+        onTrain={(name, db) => beginSession(name, db)}
+      />
+    )
+  }
 
   if (screen === 'explorer') {
     return (
@@ -139,10 +184,24 @@ export default function App() {
         openings={openings}
         statsDB={statsDB}
         deck={deck}
+        customOpenings={customOpenings}
         cleanupStats={cleanupStats}
         onToggleDeck={handleToggleDeck}
         onBack={() => setScreen('setup')}
-        onTrain={(rootName) => beginSession(rootName, null)}
+        onTrain={(rootName, allowedVariations) => {
+          if (allowedVariations && allowedVariations.size > 0) {
+            const filteredDB = buildTheoryDB(openings, rootName, minMoves, false, allowedVariations)
+            beginSession(rootName, filteredDB)
+          } else {
+            beginSession(rootName, null)
+          }
+        }}
+        onTrainCustom={(name, db) => beginSession(name, db)}
+        onEditCustom={(id) => {
+          setEditorInitialId(id)
+          setEditorReturnScreen('explorer')
+          setScreen('editor')
+        }}
       />
     )
   }
@@ -221,6 +280,19 @@ export default function App() {
         ))}
       </div>
 
+      {customOpenings.length > 0 && (
+        <>
+          <div className="divider">your openings</div>
+          <div className="presets">
+            {customOpenings.map((o) => (
+              <button key={o.id} className="preset-btn preset-btn-custom" onClick={() => beginSession(o.name, o.db)}>
+                {o.name}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
       <div className="divider">or search</div>
 
       {loadError && <p className="error">{loadError}</p>}
@@ -256,6 +328,7 @@ export default function App() {
                 setSearch(e.target.value)
                 setSelectedRoot('')
                 setDbOverride(null)
+                setDeckMode(false)
                 setShowSuggestions(true)
               }}
               onFocus={() => setShowSuggestions(true)}
@@ -283,6 +356,59 @@ export default function App() {
             )}
           </div>
 
+          {selectedRoot && allVariations.length >= 1 && (
+            <div className="variation-selector">
+              <div className="variation-selector-header">
+                <span className="variation-selector-title">Variations</span>
+                {allVariations.length >= 2 && (
+                  <>
+                    <button
+                      className="variation-all-btn"
+                      onClick={() => setSelectedVariations(new Set(allVariations))}
+                    >
+                      All
+                    </button>
+                    <button
+                      className="variation-all-btn"
+                      onClick={() => setSelectedVariations(new Set())}
+                    >
+                      None
+                    </button>
+                  </>
+                )}
+                <span className="variation-count">
+                  {selectedVariations.size}/{allVariations.length}
+                </span>
+              </div>
+              <ul className="variation-list">
+                {allVariations.map((v) => {
+                  const label = v.includes(':')
+                    ? v.split(':').slice(1).join(':').trim()
+                    : 'Main line'
+                  return (
+                    <li key={v} className="variation-item">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={selectedVariations.has(v)}
+                          onChange={(e) => {
+                            setSelectedVariations((prev) => {
+                              const next = new Set(prev)
+                              if (e.target.checked) next.add(v)
+                              else next.delete(v)
+                              return next
+                            })
+                          }}
+                        />
+                        <span>{label}</span>
+                      </label>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          )}
+
           <div className="side-picker">
             <button className={side === 'white' ? 'active' : ''} onClick={() => setSide('white')}>
               Play White
@@ -295,7 +421,7 @@ export default function App() {
           <div className="start-row">
             <button
               className="start-btn"
-              disabled={!selectedRoot}
+              disabled={!selectedRoot || selectedVariations.size === 0}
               onClick={() => beginSession(selectedRoot, null)}
             >
               Start Training
