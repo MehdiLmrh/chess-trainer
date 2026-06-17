@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Chess } from 'chess.js'
 import { Chessboard } from 'react-chessboard'
-import type { SquareHandlerArgs } from 'react-chessboard/dist/types'
+import type { SquareHandlerArgs, PieceDropHandlerArgs } from 'react-chessboard'
 import {
   loadCustomOpenings, saveCustomOpening, deleteCustomOpening,
   type CustomOpening,
@@ -159,8 +159,8 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
 
   // ── board handlers ─────────────────────────────────────────────────────────
 
-  function handleDrop({ sourceSquare, targetSquare }: { sourceSquare: string; targetSquare: string }) {
-    return recordMove(sourceSquare, targetSquare)
+  function handleDrop({ sourceSquare, targetSquare }: PieceDropHandlerArgs) {
+    return targetSquare ? recordMove(sourceSquare, targetSquare) : false
   }
 
   function handleSquareClick({ square, piece }: SquareHandlerArgs) {
