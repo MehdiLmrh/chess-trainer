@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Chess } from 'chess.js'
 import { Chessboard } from 'react-chessboard'
-import type { SquareHandlerArgs } from 'react-chessboard/dist/types'
+import type { SquareHandlerArgs } from 'react-chessboard'
 import { useTrainer } from '../hooks/useTrainer'
 import type { TheoryDB, Side } from '../types'
 
