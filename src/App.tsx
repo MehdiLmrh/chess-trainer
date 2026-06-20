@@ -8,7 +8,7 @@ import { DeckScreen } from './components/Deck'
 import { Editor } from './components/Editor'
 import { loadStats, recordStart, recordCorrect, recordWrong, recordComplete, type StatsDB } from './stats'
 import { loadExclusions, addExclusion, removeExclusion, type ExclusionsDB } from './exclusions'
-import { loadDeck, addToDeck, removeFromDeck, buildSessionQueue, type Deck, type DeckEntry } from './deck'
+import { loadDeck, addToDeck, removeFromDeck, addCustomToDeck, removeCustomFromDeck, buildSessionQueue, type Deck, type DeckEntry } from './deck'
 import { loadCustomOpenings, type CustomOpening } from './customOpenings'
 import type { Opening } from './data/lichess'
 import type { Side, TheoryDB } from './types'
@@ -103,9 +103,12 @@ export default function App() {
     sessionPosRef.current = pos + 1
     setDeckProgress({ index: pos + 1, total: queue.length })
     lastDrawnRef.current = entry.rootName
-    const overrideDB = entry.variations
-      ? buildTheoryDB(openings, entry.rootName, minMoves, false, new Set(entry.variations))
-      : null
+    let overrideDB: TheoryDB | null = null
+    if (entry.customId) {
+      overrideDB = customOpenings.find((o) => o.id === entry.customId)?.db ?? null
+    } else if (entry.variations) {
+      overrideDB = buildTheoryDB(openings, entry.rootName, minMoves, false, new Set(entry.variations))
+    }
     beginSession(entry.rootName, overrideDB, true)
   }
 
@@ -145,9 +148,17 @@ export default function App() {
 
   function handleToggleDeck(rootName: string, variations?: string[]) {
     setDeck((d) =>
-      d.some((e) => e.rootName === rootName)
+      d.some((e) => e.rootName === rootName && !e.customId)
         ? removeFromDeck(d, rootName)
         : addToDeck(d, rootName, variations),
+    )
+  }
+
+  function handleToggleCustomDeck(id: string, name: string) {
+    setDeck((d) =>
+      d.some((e) => e.customId === id)
+        ? removeCustomFromDeck(d, id)
+        : addCustomToDeck(d, id, name),
     )
   }
 
@@ -193,6 +204,7 @@ export default function App() {
         customOpenings={customOpenings}
         cleanupStats={cleanupStats}
         onToggleDeck={handleToggleDeck}
+        onToggleCustomDeck={handleToggleCustomDeck}
         onBack={() => setScreen('setup')}
         onTrain={(rootName, allowedVariations) => {
           if (allowedVariations && allowedVariations.size > 0) {
@@ -219,7 +231,11 @@ export default function App() {
         side={side}
         statsDB={statsDB}
         onBack={() => setScreen('setup')}
-        onRemove={(name) => setDeck((d) => removeFromDeck(d, name))}
+        onRemove={(entry) => setDeck((d) =>
+          entry.customId
+            ? removeCustomFromDeck(d, entry.customId)
+            : removeFromDeck(d, entry.rootName)
+        )}
         onSetSide={setSide}
         mainLineOnly={mainLineOnly}
         onSetMainLineOnly={setMainLineOnly}

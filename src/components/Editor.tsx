@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Chess } from 'chess.js'
 import { Chessboard } from 'react-chessboard'
 import type { SquareHandlerArgs, PieceDropHandlerArgs } from 'react-chessboard'
@@ -15,8 +15,64 @@ const START_FEN = new Chess().fen()
 
 interface PathStep { before: string; move: string; after: string }
 
-function parsePgn(pgn: string): string[] {
-  return pgn.replace(/\d+\.\s*/g, '').trim().split(/\s+/).filter(Boolean)
+function parsePgnMoves(pgn: string): string[] {
+  // Strip PGN tag pairs like [Event "..."]
+  let text = pgn.replace(/\[.*?\]\s*/gs, '')
+  // Strip block comments { ... }
+  text = text.replace(/\{[^}]*\}/g, '')
+  // Strip RAV (recursive annotation variants) — handle nesting iteratively
+  let prev = ''
+  while (prev !== text) { prev = text; text = text.replace(/\([^()]*\)/g, '') }
+  // Strip NAGs ($1, $2, …)
+  text = text.replace(/\$\d+/g, '')
+  // Strip game termination markers
+  text = text.replace(/\b(1-0|0-1|1\/2-1\/2|\*)\s*$/, '')
+  // Strip move numbers (e.g. "1." "1..." "12.")
+  text = text.replace(/\d+\.+\s*/g, '')
+  return text.trim().split(/\s+/).filter(Boolean)
+}
+
+function extractPgnName(pgn: string): string {
+  const m = pgn.match(/\[(?:Opening|Variation|Event)\s+"([^"]+)"\]/)
+  return m ? m[1] : ''
+}
+
+// ── variation tree ────────────────────────────────────────────────────────────
+
+type TreeToken =
+  | { t: 'num'; n: number; black: boolean }
+  | { t: 'move'; san: string; before: string; after: string }
+  | { t: 'open' }
+  | { t: 'close' }
+
+function playFen(fen: string, san: string): string {
+  const c = new Chess(fen)
+  try { c.move(san) } catch { return fen }
+  return c.fen()
+}
+
+function tokenizeDB(db: TheoryDB, fen: string, forceNum: boolean, seen: Set<string>): TreeToken[] {
+  if (seen.has(fen)) return []
+  const node = db[fen]
+  if (!node || node.moves.length === 0) return []
+  const isWhite = fen.split(' ')[1] === 'w'
+  const fullMove = parseInt(fen.split(' ')[5], 10)
+  const [main, ...alts] = node.moves
+  const childSeen = new Set([...seen, fen])
+  const toks: TreeToken[] = []
+  if (isWhite || forceNum) toks.push({ t: 'num', n: fullMove, black: !isWhite })
+  const mainAfter = playFen(fen, main.move)
+  toks.push({ t: 'move', san: main.move, before: fen, after: mainAfter })
+  for (const alt of alts) {
+    const altAfter = playFen(fen, alt.move)
+    toks.push({ t: 'open' })
+    toks.push({ t: 'num', n: fullMove, black: !isWhite })
+    toks.push({ t: 'move', san: alt.move, before: fen, after: altAfter })
+    toks.push(...tokenizeDB(db, altAfter, false, childSeen))
+    toks.push({ t: 'close' })
+  }
+  toks.push(...tokenizeDB(db, mainAfter, alts.length > 0, childSeen))
+  return toks
 }
 
 /** Re-tag every node in the DB with a new opening/variation name. */
@@ -51,7 +107,13 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
 
   // Import panel
   const [importOpen, setImportOpen]   = useState(false)
+  const [importTab, setImportTab]     = useState<'search' | 'pgn'>('search')
   const [importSearch, setImportSearch] = useState('')
+
+  // PGN import
+  const [pgnText, setPgnText]   = useState('')
+  const [pgnError, setPgnError] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Click-to-move selection
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null)
@@ -197,10 +259,38 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
     if (stepIdx >= 0) setPath((p) => p.slice(0, stepIdx))
   }
 
+  // ── tree navigation ───────────────────────────────────────────────────────
+
+  function findPathTo(targetFen: string): PathStep[] | null {
+    if (targetFen === START_FEN) return []
+    function dfs(fen: string, acc: PathStep[], seen: Set<string>): PathStep[] | null {
+      if (seen.has(fen)) return null
+      const node = db[fen]
+      if (!node) return null
+      const s2 = new Set([...seen, fen])
+      for (const m of node.moves) {
+        const after = playFen(fen, m.move)
+        const step: PathStep = { before: fen, move: m.move, after }
+        if (after === targetFen) return [...acc, step]
+        const result = dfs(after, [...acc, step], s2)
+        if (result) return result
+      }
+      return null
+    }
+    return dfs(START_FEN, [], new Set())
+  }
+
+  function jumpTo(before: string, san: string) {
+    const base = findPathTo(before)
+    if (base === null) return
+    setPath([...base, { before, move: san, after: playFen(before, san) }])
+    clearSel()
+  }
+
   // ── import helpers ─────────────────────────────────────────────────────────
 
   function loadFromPgn(varName: string, pgn: string) {
-    const moves = parsePgn(pgn)
+    const moves = parsePgnMoves(pgn)
     const chess = new Chess()
     const newDb: TheoryDB = {}
     const newPath: PathStep[] = []
@@ -232,6 +322,30 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
     clearSel()
     setImportOpen(false)
     setImportSearch('')
+  }
+
+  function handleLoadPgn() {
+    const trimmed = pgnText.trim()
+    if (!trimmed) { setPgnError('Paste or upload a PGN first.'); return }
+    const moves = parsePgnMoves(trimmed)
+    if (moves.length === 0) { setPgnError('No valid moves found in the PGN.'); return }
+    const detected = extractPgnName(trimmed)
+    loadFromPgn(detected || name, trimmed)
+    setPgnText('')
+    setPgnError('')
+  }
+
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string
+      setPgnText(text ?? '')
+      setPgnError('')
+    }
+    reader.readAsText(file)
+    e.target.value = ''
   }
 
   // ── save / load / new ─────────────────────────────────────────────────────
@@ -270,7 +384,9 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
 
   const continuations  = db[currentFen]?.moves ?? []
   const positionCount  = Object.keys(db).length
-  const pathMoves      = path.map((s) => s.move)
+  const treeTokens     = useMemo(() => tokenizeDB(db, START_FEN, true, new Set()), [db])
+  const pathSet        = useMemo(() => new Set(path.map((s) => `${s.before}\n${s.move}`)), [path])
+  const currentKey     = path.length > 0 ? `${path[path.length - 1].before}\n${path[path.length - 1].move}` : ''
 
   const squareStyles: Record<string, React.CSSProperties> = {}
   if (selectedSquare)
@@ -301,7 +417,7 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
         <button
           className={`editor-icon-btn${importOpen ? ' active' : ''}`}
           title="Import from existing opening"
-          onClick={() => { setImportOpen((v) => !v); setImportSearch('') }}
+          onClick={() => { setImportOpen((v) => !v); setImportSearch(''); setPgnText(''); setPgnError('') }}
         >⤵ Import</button>
         <button
           className="editor-icon-btn"
@@ -313,35 +429,81 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
       {/* Import panel */}
       {importOpen && (
         <div className="editor-import">
-          <input
-            className="editor-import-search"
-            type="text"
-            placeholder="Search opening or variation…"
-            value={importSearch}
-            onChange={(e) => setImportSearch(e.target.value)}
-            autoFocus
-          />
-          {importQuery.length >= 2 && (
-            <ul className="editor-import-results">
-              {importCustomResults.map((o) => (
-                <li key={o.id} className="editor-import-item" onClick={() => loadFromCustom(o)}>
-                  <span className="editor-import-name">{o.name}</span>
-                  <span className="editor-import-tag">custom</span>
-                </li>
-              ))}
-              {importLichessResults.map((o) => (
-                <li key={o.eco + o.name} className="editor-import-item" onClick={() => loadFromPgn(o.name, o.pgn)}>
-                  <span className="editor-import-name">{o.name}</span>
-                  <span className="editor-import-tag">{o.eco}</span>
-                </li>
-              ))}
-              {importCustomResults.length === 0 && importLichessResults.length === 0 && (
-                <li className="editor-import-empty">No results</li>
+          <div className="editor-import-tabs">
+            <button
+              className={`editor-import-tab${importTab === 'search' ? ' active' : ''}`}
+              onClick={() => setImportTab('search')}
+            >Search</button>
+            <button
+              className={`editor-import-tab${importTab === 'pgn' ? ' active' : ''}`}
+              onClick={() => setImportTab('pgn')}
+            >PGN</button>
+          </div>
+
+          {importTab === 'search' && (
+            <>
+              <input
+                className="editor-import-search"
+                type="text"
+                placeholder="Search opening or variation…"
+                value={importSearch}
+                onChange={(e) => setImportSearch(e.target.value)}
+                autoFocus
+              />
+              {importQuery.length >= 2 && (
+                <ul className="editor-import-results">
+                  {importCustomResults.map((o) => (
+                    <li key={o.id} className="editor-import-item" onClick={() => loadFromCustom(o)}>
+                      <span className="editor-import-name">{o.name}</span>
+                      <span className="editor-import-tag">custom</span>
+                    </li>
+                  ))}
+                  {importLichessResults.map((o) => (
+                    <li key={o.eco + o.name} className="editor-import-item" onClick={() => loadFromPgn(o.name, o.pgn)}>
+                      <span className="editor-import-name">{o.name}</span>
+                      <span className="editor-import-tag">{o.eco}</span>
+                    </li>
+                  ))}
+                  {importCustomResults.length === 0 && importLichessResults.length === 0 && (
+                    <li className="editor-import-empty">No results</li>
+                  )}
+                </ul>
               )}
-            </ul>
+              {importQuery.length < 2 && (
+                <p className="editor-import-hint">Type at least 2 characters to search</p>
+              )}
+            </>
           )}
-          {importQuery.length < 2 && (
-            <p className="editor-import-hint">Type at least 2 characters to search</p>
+
+          {importTab === 'pgn' && (
+            <>
+              <textarea
+                className="editor-pgn-textarea"
+                placeholder="Paste PGN here…"
+                value={pgnText}
+                onChange={(e) => { setPgnText(e.target.value); setPgnError('') }}
+                spellCheck={false}
+              />
+              <div className="editor-pgn-actions">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pgn,.txt"
+                  style={{ display: 'none' }}
+                  onChange={handleFileUpload}
+                />
+                <button
+                  className="editor-pgn-upload-btn"
+                  onClick={() => fileInputRef.current?.click()}
+                >Upload .pgn</button>
+                <button
+                  className="editor-pgn-load-btn"
+                  disabled={!pgnText.trim()}
+                  onClick={handleLoadPgn}
+                >Load</button>
+              </div>
+              {pgnError && <p className="editor-pgn-error">{pgnError}</p>}
+            </>
           )}
         </div>
       )}
@@ -362,54 +524,37 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
         </div>
 
         <div className="editor-panel">
-          {/* Current path */}
-          <div className="editor-section-label">Current line</div>
-          <div className="editor-movelist">
-            {pathMoves.length === 0
+          {/* Variation tree */}
+          <div className="editor-section-label">Variation tree</div>
+          <div className="tree-view">
+            {treeTokens.length === 0
               ? <span className="editor-hint">Drag or click a piece to record moves…</span>
-              : Array.from({ length: Math.ceil(pathMoves.length / 2) }, (_, i) => {
-                  const wi = i * 2
-                  const bi = i * 2 + 1
+              : treeTokens.map((tok, i) => {
+                  if (tok.t === 'num')
+                    return <span key={i} className="tree-num">{tok.n}{tok.black ? '…' : '.'}</span>
+                  if (tok.t === 'open')
+                    return <span key={i} className="tree-paren">(</span>
+                  if (tok.t === 'close')
+                    return <span key={i} className="tree-paren">)</span>
+                  const key = `${tok.before}\n${tok.san}`
+                  const isCurrent = key === currentKey
+                  const onPath = !isCurrent && pathSet.has(key)
                   return (
-                    <span key={i} className="var-move-pair">
-                      <span className="var-move-num">{i + 1}.</span>
+                    <span key={i} className="tree-move-wrap">
                       <span
-                        className={`var-move${path.length === wi + 1 ? ' active' : ''}`}
-                        onClick={() => { setPath((p) => p.slice(0, wi + 1)); clearSel() }}
-                      >{pathMoves[wi]}</span>
-                      {pathMoves[bi] && (
-                        <span
-                          className={`var-move${path.length === bi + 1 ? ' active' : ''}`}
-                          onClick={() => { setPath((p) => p.slice(0, bi + 1)); clearSel() }}
-                        >{pathMoves[bi]}</span>
-                      )}
+                        className={`tree-move${isCurrent ? ' current' : onPath ? ' on-path' : ''}`}
+                        onClick={() => jumpTo(tok.before, tok.san)}
+                      >{tok.san}</span>
+                      <span
+                        className="tree-move-del"
+                        title="Remove this move"
+                        onClick={(e) => { e.stopPropagation(); deleteMove(tok.before, tok.san) }}
+                      >×</span>
                     </span>
                   )
                 })
             }
           </div>
-
-          {/* Continuations at current position */}
-          <div className="editor-section-label">
-            {continuations.length === 0 ? 'No continuations recorded' : 'Continuations'}
-          </div>
-          {continuations.length > 0 && (
-            <div className="editor-cont-list">
-              {continuations.map((m) => (
-                <span key={m.move} className="editor-cont-item">
-                  <button
-                    className="editor-cont-btn"
-                    onClick={() => navigateTo(currentFen, m.move)}
-                  >{m.move}</button>
-                  <button
-                    className="editor-cont-delete"
-                    title="Remove this move"
-                    onClick={() => deleteMove(currentFen, m.move)}
-                  >×</button>
-                </span>
-              ))}
-            </div>
-          )}
 
           {/* Nav */}
           <div className="editor-nav">

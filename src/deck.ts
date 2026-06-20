@@ -2,7 +2,8 @@ import type { StatsDB } from './stats'
 
 export interface DeckEntry {
   rootName: string
-  variations?: string[]  // undefined = all variations
+  variations?: string[]  // undefined = all variations; only for Lichess entries
+  customId?: string      // set when this entry refers to a custom opening
 }
 
 export type Deck = DeckEntry[]
@@ -34,7 +35,20 @@ export function addToDeck(deck: Deck, rootName: string, variations?: string[]): 
 }
 
 export function removeFromDeck(deck: Deck, rootName: string): Deck {
-  const next = deck.filter((e) => e.rootName !== rootName)
+  const next = deck.filter((e) => e.rootName !== rootName || e.customId)
+  save(next)
+  return next
+}
+
+export function addCustomToDeck(deck: Deck, customId: string, name: string): Deck {
+  if (deck.some((e) => e.customId === customId)) return deck
+  const next = [...deck, { rootName: name, customId }]
+  save(next)
+  return next
+}
+
+export function removeCustomFromDeck(deck: Deck, customId: string): Deck {
+  const next = deck.filter((e) => e.customId !== customId)
   save(next)
   return next
 }

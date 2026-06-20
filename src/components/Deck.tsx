@@ -17,7 +17,7 @@ interface Props {
   statsDB: StatsDB
   mainLineOnly: boolean
   onBack: () => void
-  onRemove: (opening: string) => void
+  onRemove: (entry: DeckEntry) => void
   onSetSide: (side: Side) => void
   onSetMainLineOnly: (v: boolean) => void
   onStart: (filtered: DeckEntry[]) => void
@@ -73,10 +73,14 @@ export function DeckScreen({ deck, side, statsDB, mainLineOnly, onBack, onRemove
           <ul className="deck-list">
             {deck.map((entry) => {
               const excluded = (statsDB[entry.rootName]?.perfect ?? 0) >= maxPerfect
+              const key = entry.customId ?? entry.rootName
               return (
-                <li key={entry.rootName} className={`deck-item${excluded ? ' deck-item-excluded' : ''}`}>
+                <li key={key} className={`deck-item${excluded ? ' deck-item-excluded' : ''}`}>
                   <span className="deck-item-name">{entry.rootName}</span>
-                  {entry.variations && (
+                  {entry.customId && (
+                    <span className="deck-item-tag">custom</span>
+                  )}
+                  {!entry.customId && entry.variations && (
                     <span className="deck-item-vars" title={entry.variations.join('\n')}>
                       {entry.variations.length} var{entry.variations.length !== 1 ? 's' : ''}
                     </span>
@@ -85,7 +89,7 @@ export function DeckScreen({ deck, side, statsDB, mainLineOnly, onBack, onRemove
                   <button
                     className="deck-remove-btn"
                     title="Remove from deck"
-                    onClick={() => onRemove(entry.rootName)}
+                    onClick={() => onRemove(entry)}
                   >
                     ×
                   </button>

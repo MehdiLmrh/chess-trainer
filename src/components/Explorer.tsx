@@ -200,6 +200,7 @@ interface Props {
   customOpenings: CustomOpening[]
   cleanupStats: CleanupStats | null
   onToggleDeck: (rootName: string, variations?: string[]) => void
+  onToggleCustomDeck: (id: string, name: string) => void
   onBack: () => void
   onTrain: (rootName: string, allowedVariations?: Set<string>) => void
   onTrainCustom: (name: string, db: TheoryDB) => void
@@ -210,7 +211,7 @@ interface Props {
 
 export function Explorer({
   openings, statsDB, deck, customOpenings, cleanupStats,
-  onToggleDeck, onBack, onTrain, onTrainCustom, onEditCustom,
+  onToggleDeck, onToggleCustomDeck, onBack, onTrain, onTrainCustom, onEditCustom,
 }: Props) {
   const [search, setSearch]         = useState('')
   const [openState, setOpenState]   = useState<Record<string, boolean>>({})
@@ -332,6 +333,16 @@ export function Explorer({
                     <span className="tree-badges">
                       <span className="tree-count">{o.lines.length} line{o.lines.length !== 1 ? 's' : ''}</span>
                     </span>
+                    {(() => {
+                      const inDeck = deck.some((e) => e.customId === o.id)
+                      return (
+                        <button
+                          className={`tree-deck-btn${inDeck ? ' in-deck' : ''}`}
+                          title={inDeck ? 'Remove from deck' : 'Add to deck'}
+                          onClick={(e) => { e.stopPropagation(); onToggleCustomDeck(o.id, o.name) }}
+                        >{inDeck ? '✓' : '+'}</button>
+                      )
+                    })()}
                     <button
                       className="tree-edit-btn"
                       onClick={(e) => { e.stopPropagation(); onEditCustom(o.id) }}
