@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Chess } from 'chess.js'
 import { Chessboard } from 'react-chessboard'
 import type { SquareHandlerArgs } from 'react-chessboard'
@@ -40,9 +40,33 @@ export function Trainer({
   onCorrect, onWrong, onEndOfTheory,
   onExclude, onReset, onBack, onNext,
 }: Props) {
-  const { fen, feedback, variationName, hintMoves, onUserMove, revealAnswer } = useTrainer(
+  const { fen, fenHistory, feedback, variationName, hintMoves, onUserMove, revealAnswer } = useTrainer(
     db, side, { onCorrect, onWrong, onEndOfTheory },
   )
+
+  const [reviewIdx, setReviewIdx] = useState(0)
+  const [isReviewing, setIsReviewing] = useState(false)
+
+  // Follow the live position unless the user navigated back
+  useEffect(() => {
+    if (!isReviewing) setReviewIdx(fenHistory.length - 1)
+  }, [fenHistory.length, isReviewing])
+
+  const displayFen = fenHistory[reviewIdx] ?? fen
+  const isLive = reviewIdx === fenHistory.length - 1
+
+  function goBack() {
+    setIsReviewing(true)
+    setReviewIdx((i) => Math.max(0, i - 1))
+  }
+
+  function goForward() {
+    setReviewIdx((i) => {
+      const next = Math.min(fenHistory.length - 1, i + 1)
+      if (next === fenHistory.length - 1) setIsReviewing(false)
+      return next
+    })
+  }
 
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null)
   const [moveTargets, setMoveTargets] = useState<{ empty: string[]; capture: string[] }>({ empty: [], capture: [] })
@@ -68,7 +92,7 @@ export function Trainer({
   }
 
   function handleSquareClick({ square, piece }: SquareHandlerArgs) {
-    if (feedback === 'end-of-theory') return
+    if (!isLive || feedback === 'end-of-theory') return
 
     const pieceColor = piece?.pieceType[0]  // 'w' or 'b'
     const allTargets = [...moveTargets.empty, ...moveTargets.capture]
@@ -142,26 +166,46 @@ export function Trainer({
       <div className="board-wrap">
         <Chessboard
           options={{
-            position: fen,
+            position: displayFen,
             boardOrientation: side,
             animationDurationInMs: 200,
-            onPieceDrop: ({ sourceSquare, targetSquare }) => {
-              clearSelection()
-              return targetSquare ? onUserMove(sourceSquare, targetSquare) : false
-            },
+            onPieceDrop: isLive
+              ? ({ sourceSquare, targetSquare }) => {
+                  clearSelection()
+                  return targetSquare ? onUserMove(sourceSquare, targetSquare) : false
+                }
+              : () => false,
             onSquareClick: handleSquareClick,
-            squareStyles,
-            arrows: hintMoves.map((h) => ({
+            squareStyles: isLive ? squareStyles : {},
+            arrows: isLive ? hintMoves.map((h) => ({
               startSquare: h.from,
               endSquare: h.to,
               color: 'rgba(124,131,253,0.8)',
-            })),
+            })) : [],
           }}
         />
       </div>
 
+      <div className="history-nav">
+        <button
+          className="history-nav-btn"
+          disabled={reviewIdx === 0}
+          onClick={goBack}
+          title="Previous move (←)"
+        >←</button>
+        {!isLive && (
+          <span className="history-nav-label">Move {reviewIdx} / {fenHistory.length - 1}</span>
+        )}
+        <button
+          className="history-nav-btn"
+          disabled={isLive}
+          onClick={goForward}
+          title="Next move (→)"
+        >→</button>
+      </div>
+
       <div className="feedback" style={{ color: FEEDBACK_COLORS[feedback] }}>
-        {FEEDBACK_LABELS[feedback]}
+        {isLive ? FEEDBACK_LABELS[feedback] : ''}
       </div>
 
       <div className="actions">

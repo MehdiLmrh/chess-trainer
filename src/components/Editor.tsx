@@ -76,6 +76,30 @@ function tokenizeDB(db: TheoryDB, fen: string, forceNum: boolean, seen: Set<stri
 }
 
 /** Re-tag every node in the DB with a new opening/variation name. */
+function dbToPgn(db: TheoryDB, openingName: string): string {
+  const tokens = tokenizeDB(db, START_FEN, true, new Set())
+  const parts: string[] = []
+  for (const tok of tokens) {
+    if (tok.t === 'num') parts.push(`${tok.n}${tok.black ? '...' : '.'}`)
+    else if (tok.t === 'move') parts.push(tok.san)
+    else if (tok.t === 'open') parts.push('(')
+    else if (tok.t === 'close') parts.push(')')
+  }
+  return `[Opening "${openingName}"]\n\n${parts.join(' ')} *`
+}
+
+function triggerPgnDownload(openingName: string, db: TheoryDB) {
+  const pgn = dbToPgn(db, openingName)
+  const blob = new Blob([pgn], { type: 'application/x-chess-pgn' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${openingName.replace(/[^a-zA-Z0-9\- ]/g, '_')}.pgn`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+/** Re-tag every node in the DB with a new opening/variation name. */
 function retag(db: TheoryDB, name: string): TheoryDB {
   const out: TheoryDB = {}
   for (const [fen, node] of Object.entries(db)) {
@@ -589,6 +613,12 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
           disabled={positionCount === 0 || !name.trim()}
           onClick={handleSave}
         >{editingId ? 'Update' : 'Save'}</button>
+        <button
+          className="editor-export-btn"
+          disabled={positionCount === 0}
+          title="Download as PGN"
+          onClick={() => triggerPgnDownload(name.trim() || 'My Opening', db)}
+        >Export PGN</button>
         <button className="editor-new-btn" onClick={handleNew}>New</button>
       </div>
 
@@ -603,6 +633,7 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
                 <span className="editor-saved-count">{Object.keys(o.db).length} pos</span>
                 <button className="editor-saved-btn" onClick={() => onTrain(o.name, o.db)}>Train</button>
                 <button className="editor-saved-btn" onClick={() => handleEdit(o)}>Edit</button>
+                <button className="editor-saved-btn" onClick={() => triggerPgnDownload(o.name, o.db)}>Export</button>
                 <button className="editor-saved-btn editor-saved-delete" onClick={() => handleDelete(o.id)}>Delete</button>
               </li>
             ))}

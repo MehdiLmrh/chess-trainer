@@ -38,6 +38,7 @@ function getFinalMoveArrows(fen: string, db: TheoryDB): HintMove[] {
 export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks = {}) {
   const chess = useRef(new Chess())
   const [fen, setFen] = useState(chess.current.fen())
+  const [fenHistory, setFenHistory] = useState<string[]>(() => [chess.current.fen()])
   const [feedback, setFeedback] = useState<FeedbackStatus>('idle')
   const [variationName, setVariationName] = useState('')
   const variationNameRef = useRef('')
@@ -46,6 +47,11 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
   const appColor = side === 'white' ? 'b' : 'w'
 
   const { onCorrect, onWrong, onEndOfTheory } = callbacks
+
+  const pushFen = useCallback((newFen: string) => {
+    setFen(newFen)
+    setFenHistory((h) => [...h, newFen])
+  }, [])
 
   const playAppMove = useCallback(() => {
     const currentFen = chess.current.fen()
@@ -59,7 +65,7 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
     const picked = node.moves[Math.floor(Math.random() * node.moves.length)]
     chess.current.move(picked.move)
     const newFen = chess.current.fen()
-    setFen(newFen)
+    pushFen(newFen)
     variationNameRef.current = picked.variation
     setVariationName(picked.variation)
 
@@ -71,7 +77,7 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
     } else {
       setHintMoves(getFinalMoveArrows(newFen, db))
     }
-  }, [db, onEndOfTheory])
+  }, [db, onEndOfTheory, pushFen])
 
   useEffect(() => {
     if (chess.current.turn() !== appColor) return
@@ -115,7 +121,7 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
 
       variationNameRef.current = matched.variation
       setVariationName(matched.variation)
-      setFen(afterFen)
+      pushFen(afterFen)
       setFeedback('correct')
       setHintMoves([])
       onCorrect?.()
@@ -125,9 +131,10 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
         playAppMove()
       }, 600)
 
+
       return true
     },
-    [appColor, db, playAppMove, onCorrect, onWrong],
+    [appColor, db, playAppMove, pushFen, onCorrect, onWrong],
   )
 
   const revealAnswer = useCallback(() => {
@@ -146,13 +153,13 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
     setTimeout(() => {
       chess.current.move(picked.move)
       const newFen = chess.current.fen()
-      setFen(newFen)
+      pushFen(newFen)
       setVariationName(picked.variation)
       setHintMoves([])
       setFeedback('idle')
       setTimeout(() => playAppMove(), 600)
     }, 1000)
-  }, [db, playAppMove])
+  }, [db, playAppMove, pushFen])
 
-  return { fen, feedback, variationName, hintMoves, onUserMove, revealAnswer }
+  return { fen, fenHistory, feedback, variationName, hintMoves, onUserMove, revealAnswer }
 }
