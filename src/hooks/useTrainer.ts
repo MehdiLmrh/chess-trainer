@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Chess } from 'chess.js'
-import type { TheoryDB, Side, FeedbackStatus } from '../types'
+import type { TheoryDB, TheoryMove, Side, FeedbackStatus } from '../types'
 
 export interface HintMove { from: string; to: string }
+
+export interface MoveRecord {
+  from: string
+  to: string
+  isUserMove: boolean
+  isBest: boolean
+  bestFrom?: string
+  bestTo?: string
+}
 
 interface TrainerCallbacks {
   onCorrect?: () => void
@@ -10,8 +19,31 @@ interface TrainerCallbacks {
   onEndOfTheory?: (isPerfect: boolean, variation: string) => void
 }
 
-// Returns arrows for all valid moves when every child position is end-of-theory.
-// This surfaces all legal final moves simultaneously so the user can see all options.
+export interface TrainerConfig {
+  ownThreshold?: number      // centipawns: max eval drop for user moves (Infinity = any)
+  opponentThreshold?: number // centipawns: max eval drop for opponent candidates (Infinity = any)
+}
+
+function getBestEval(moves: TheoryMove[], whiteTurn: boolean): number | undefined {
+  const evals = moves.map(m => m.eval).filter((e): e is number => e !== undefined)
+  if (!evals.length) return undefined
+  return whiteTurn ? Math.max(...evals) : Math.min(...evals)
+}
+
+function getEvalDrop(moveEval: number, bestEval: number, whiteTurn: boolean): number {
+  return whiteTurn ? bestEval - moveEval : moveEval - bestEval
+}
+
+function getBestSquares(moves: TheoryMove[], bestEval: number, whiteTurn: boolean, fen: string): { from: string; to: string } | undefined {
+  const bestM = moves.find(m => m.eval !== undefined && Math.abs(getEvalDrop(m.eval, bestEval, whiteTurn)) < 0.5)
+  if (!bestM) return undefined
+  const test = new Chess(fen)
+  try {
+    const r = test.move(bestM.move)
+    return r ? { from: r.from, to: r.to } : undefined
+  } catch { return undefined }
+}
+
 function getFinalMoveArrows(fen: string, db: TheoryDB): HintMove[] {
   const node = db[fen]
   if (!node || node.moves.length < 2) return []
@@ -35,22 +67,34 @@ function getFinalMoveArrows(fen: string, db: TheoryDB): HintMove[] {
   })
 }
 
-export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks = {}) {
+export function useTrainer(
+  db: TheoryDB,
+  side: Side,
+  callbacks: TrainerCallbacks = {},
+  config: TrainerConfig = {},
+) {
+  const { ownThreshold = Infinity, opponentThreshold = Infinity } = config
   const chess = useRef(new Chess())
   const [fen, setFen] = useState(chess.current.fen())
   const [fenHistory, setFenHistory] = useState<string[]>(() => [chess.current.fen()])
+  const [moveHistory, setMoveHistory] = useState<MoveRecord[]>([])
   const [feedback, setFeedback] = useState<FeedbackStatus>('idle')
   const [variationName, setVariationName] = useState('')
   const variationNameRef = useRef('')
   const [hintMoves, setHintMoves] = useState<HintMove[]>([])
   const sessionWrongsRef = useRef(0)
   const appColor = side === 'white' ? 'b' : 'w'
+  const userIsWhite = side === 'white'
 
   const { onCorrect, onWrong, onEndOfTheory } = callbacks
 
   const pushFen = useCallback((newFen: string) => {
     setFen(newFen)
-    setFenHistory((h) => [...h, newFen])
+    setFenHistory(h => [...h, newFen])
+  }, [])
+
+  const pushRecord = useCallback((rec: MoveRecord) => {
+    setMoveHistory(h => [...h, rec])
   }, [])
 
   const playAppMove = useCallback(() => {
@@ -62,10 +106,24 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
       return
     }
 
-    const picked = node.moves[Math.floor(Math.random() * node.moves.length)]
-    chess.current.move(picked.move)
+    const opponentIsWhite = !userIsWhite
+    const bestEval = getBestEval(node.moves, opponentIsWhite)
+    let candidates = node.moves
+    if (bestEval !== undefined && isFinite(opponentThreshold)) {
+      const filtered = node.moves.filter(m => {
+        if (m.eval === undefined) return true
+        return getEvalDrop(m.eval, bestEval, opponentIsWhite) <= opponentThreshold
+      })
+      if (filtered.length > 0) candidates = filtered
+    }
+
+    const picked = candidates[Math.floor(Math.random() * candidates.length)]
+    const moveResult = chess.current.move(picked.move)
+    if (!moveResult) return
+
     const newFen = chess.current.fen()
     pushFen(newFen)
+    pushRecord({ from: moveResult.from, to: moveResult.to, isUserMove: false, isBest: false })
     variationNameRef.current = picked.variation
     setVariationName(picked.variation)
 
@@ -77,7 +135,7 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
     } else {
       setHintMoves(getFinalMoveArrows(newFen, db))
     }
-  }, [db, onEndOfTheory, pushFen])
+  }, [db, onEndOfTheory, pushFen, pushRecord, opponentThreshold, userIsWhite])
 
   useEffect(() => {
     if (chess.current.turn() !== appColor) return
@@ -91,8 +149,10 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
       if (chess.current.turn() === appColor) return false
 
       const beforeFen = chess.current.fen()
+
+      let moveResult: ReturnType<typeof chess.current.move>
       try {
-        chess.current.move({ from: sourceSquare, to: targetSquare, promotion: 'q' })
+        moveResult = chess.current.move({ from: sourceSquare, to: targetSquare, promotion: 'q' })
       } catch {
         return false
       }
@@ -119,10 +179,34 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
         return false
       }
 
+      const bestEval = getBestEval(node.moves, userIsWhite)
+      let isBest = false
+
+      if (bestEval !== undefined && matched.eval !== undefined) {
+        const drop = getEvalDrop(matched.eval, bestEval, userIsWhite)
+        if (isFinite(ownThreshold) && drop > ownThreshold) {
+          chess.current.undo()
+          setFeedback('too-weak')
+          sessionWrongsRef.current += 1
+          onWrong?.()
+          return false
+        }
+        isBest = drop < 0.5
+      }
+
+      let bestFrom: string | undefined
+      let bestTo: string | undefined
+      if (!isBest && bestEval !== undefined) {
+        const bsq = getBestSquares(node.moves, bestEval, userIsWhite, beforeFen)
+        bestFrom = bsq?.from
+        bestTo = bsq?.to
+      }
+
+      pushFen(afterFen)
+      pushRecord({ from: moveResult.from, to: moveResult.to, isUserMove: true, isBest, bestFrom, bestTo })
       variationNameRef.current = matched.variation
       setVariationName(matched.variation)
-      pushFen(afterFen)
-      setFeedback('correct')
+      setFeedback(isBest ? 'correct-best' : 'correct')
       setHintMoves([])
       onCorrect?.()
 
@@ -131,10 +215,9 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
         playAppMove()
       }, 600)
 
-
       return true
     },
-    [appColor, db, playAppMove, pushFen, onCorrect, onWrong],
+    [appColor, db, playAppMove, pushFen, pushRecord, onCorrect, onWrong, ownThreshold, userIsWhite],
   )
 
   const revealAnswer = useCallback(() => {
@@ -144,22 +227,24 @@ export function useTrainer(db: TheoryDB, side: Side, callbacks: TrainerCallbacks
 
     const picked = node.moves[Math.floor(Math.random() * node.moves.length)]
     const test = new Chess(currentFen)
-    const moveResult = test.move(picked.move)
-    if (!moveResult) return
+    const previewResult = test.move(picked.move)
+    if (!previewResult) return
 
-    setHintMoves([{ from: moveResult.from, to: moveResult.to }])
+    setHintMoves([{ from: previewResult.from, to: previewResult.to }])
     setFeedback('idle')
 
     setTimeout(() => {
-      chess.current.move(picked.move)
+      const moveResult = chess.current.move(picked.move)
+      if (!moveResult) return
       const newFen = chess.current.fen()
       pushFen(newFen)
+      pushRecord({ from: moveResult.from, to: moveResult.to, isUserMove: false, isBest: false })
       setVariationName(picked.variation)
       setHintMoves([])
       setFeedback('idle')
       setTimeout(() => playAppMove(), 600)
     }, 1000)
-  }, [db, playAppMove, pushFen])
+  }, [db, playAppMove, pushFen, pushRecord])
 
-  return { fen, fenHistory, feedback, variationName, hintMoves, onUserMove, revealAnswer }
+  return { fen, fenHistory, moveHistory, feedback, variationName, hintMoves, onUserMove, revealAnswer }
 }

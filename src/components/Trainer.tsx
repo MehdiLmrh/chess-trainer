@@ -4,18 +4,23 @@ import { Chessboard } from 'react-chessboard'
 import type { SquareHandlerArgs } from 'react-chessboard'
 import { useTrainer } from '../hooks/useTrainer'
 import type { TheoryDB, Side } from '../types'
+import type { TrainerConfig } from '../hooks/useTrainer'
 
-const FEEDBACK_LABELS = {
+const FEEDBACK_LABELS: Record<string, string> = {
   idle: '',
   correct: 'Correct',
+  'correct-best': 'Correct ★',
+  'too-weak': 'Move found but too weak — try a stronger move',
   wrong: 'Not in theory — try again',
   'out-of-theory': 'Position not in database',
   'end-of-theory': 'End of line — theory complete',
 }
 
-const FEEDBACK_COLORS = {
+const FEEDBACK_COLORS: Record<string, string> = {
   idle: 'transparent',
   correct: '#2ecc71',
+  'correct-best': '#2ecc71',
+  'too-weak': '#e67e22',
   wrong: '#e74c3c',
   'out-of-theory': '#f39c12',
   'end-of-theory': '#7c83fd',
@@ -26,6 +31,7 @@ interface Props {
   side: Side
   selectedRoot: string
   deckProgress?: { index: number; total: number }
+  evalConfig?: TrainerConfig
   onCorrect: () => void
   onWrong: () => void
   onEndOfTheory: (isPerfect: boolean, variation: string) => void
@@ -36,18 +42,17 @@ interface Props {
 }
 
 export function Trainer({
-  db, side, selectedRoot, deckProgress,
+  db, side, selectedRoot, deckProgress, evalConfig,
   onCorrect, onWrong, onEndOfTheory,
   onExclude, onReset, onBack, onNext,
 }: Props) {
-  const { fen, fenHistory, feedback, variationName, hintMoves, onUserMove, revealAnswer } = useTrainer(
-    db, side, { onCorrect, onWrong, onEndOfTheory },
+  const { fen, fenHistory, moveHistory, feedback, variationName, hintMoves, onUserMove, revealAnswer } = useTrainer(
+    db, side, { onCorrect, onWrong, onEndOfTheory }, evalConfig,
   )
 
   const [reviewIdx, setReviewIdx] = useState(0)
   const [isReviewing, setIsReviewing] = useState(false)
 
-  // Follow the live position unless the user navigated back
   useEffect(() => {
     if (!isReviewing) setReviewIdx(fenHistory.length - 1)
   }, [fenHistory.length, isReviewing])
@@ -94,7 +99,7 @@ export function Trainer({
   function handleSquareClick({ square, piece }: SquareHandlerArgs) {
     if (!isLive || feedback === 'end-of-theory') return
 
-    const pieceColor = piece?.pieceType[0]  // 'w' or 'b'
+    const pieceColor = piece?.pieceType[0]
     const allTargets = [...moveTargets.empty, ...moveTargets.capture]
 
     if (selectedSquare) {
@@ -116,7 +121,6 @@ export function Trainer({
     }
   }
 
-  // Build squareStyles: selected square highlight + dots/rings for targets
   const squareStyles: Record<string, React.CSSProperties> = {}
   if (selectedSquare) {
     squareStyles[selectedSquare] = { background: 'rgba(124,131,253,0.35)' }
@@ -133,6 +137,26 @@ export function Trainer({
       cursor: 'pointer',
     }
   }
+
+  // In review mode: show arrows for the move made FROM the displayed position
+  const reviewArrows = (() => {
+    if (isLive || reviewIdx >= fenHistory.length - 1) return []
+    const rec = moveHistory[reviewIdx]
+    if (!rec) return []
+    if (rec.isUserMove) {
+      const played = {
+        startSquare: rec.from,
+        endSquare: rec.to,
+        color: rec.isBest ? 'rgba(46,204,113,0.85)' : 'rgba(124,131,253,0.75)',
+      }
+      if (rec.isBest || !rec.bestFrom || !rec.bestTo) return [played]
+      return [
+        played,
+        { startSquare: rec.bestFrom, endSquare: rec.bestTo, color: 'rgba(46,204,113,0.85)' },
+      ]
+    }
+    return [{ startSquare: rec.from, endSquare: rec.to, color: 'rgba(160,160,160,0.55)' }]
+  })()
 
   const showVariation = variationName && variationName !== selectedRoot
   const canExclude = showVariation && feedback !== 'wrong' && feedback !== 'out-of-theory'
@@ -177,11 +201,13 @@ export function Trainer({
               : () => false,
             onSquareClick: handleSquareClick,
             squareStyles: isLive ? squareStyles : {},
-            arrows: isLive ? hintMoves.map((h) => ({
-              startSquare: h.from,
-              endSquare: h.to,
-              color: 'rgba(124,131,253,0.8)',
-            })) : [],
+            arrows: isLive
+              ? hintMoves.map((h) => ({
+                  startSquare: h.from,
+                  endSquare: h.to,
+                  color: 'rgba(124,131,253,0.8)',
+                }))
+              : reviewArrows,
           }}
         />
       </div>
@@ -204,12 +230,12 @@ export function Trainer({
         >→</button>
       </div>
 
-      <div className="feedback" style={{ color: FEEDBACK_COLORS[feedback] }}>
+      <div className="feedback" style={{ color: FEEDBACK_COLORS[feedback] ?? 'transparent' }}>
         {isLive ? FEEDBACK_LABELS[feedback] : ''}
       </div>
 
       <div className="actions">
-        {(feedback === 'wrong' || feedback === 'out-of-theory') && (
+        {(feedback === 'wrong' || feedback === 'out-of-theory' || feedback === 'too-weak') && (
           <button className="reveal-btn" onClick={revealAnswer}>Reveal Answer</button>
         )}
         {feedback === 'end-of-theory' && onNext && (

@@ -7,7 +7,7 @@ import {
   type CustomOpening,
 } from '../customOpenings'
 import type { Opening } from '../data/lichess'
-import type { TheoryDB, Side } from '../types'
+import type { TheoryDB, TheoryMove, Side } from '../types'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -15,21 +15,74 @@ const START_FEN = new Chess().fen()
 
 interface PathStep { before: string; move: string; after: string }
 
-function parsePgnMoves(pgn: string): string[] {
-  // Strip PGN tag pairs like [Event "..."]
-  let text = pgn.replace(/\[.*?\]\s*/gs, '')
-  // Strip block comments { ... }
-  text = text.replace(/\{[^}]*\}/g, '')
-  // Strip RAV (recursive annotation variants) — handle nesting iteratively
-  let prev = ''
-  while (prev !== text) { prev = text; text = text.replace(/\([^()]*\)/g, '') }
-  // Strip NAGs ($1, $2, …)
-  text = text.replace(/\$\d+/g, '')
-  // Strip game termination markers
+function parsePgnToDb(pgn: string, varName: string): TheoryDB {
+  // Strip PGN headers ([TagName "value"]) but NOT inline annotations like [%eval 0.23]
+  let text = pgn.replace(/\[[A-Za-z]\w*\s+"[^"]*"\]\s*/g, '')
+  // Keep {} comments for eval extraction — strip only ; line comments
+  text = text.replace(/;[^\n]*/g, '')
   text = text.replace(/\b(1-0|0-1|1\/2-1\/2|\*)\s*$/, '')
-  // Strip move numbers (e.g. "1." "1..." "12.")
-  text = text.replace(/\d+\.+\s*/g, '')
-  return text.trim().split(/\s+/).filter(Boolean)
+
+  // Include {…} comment blocks as tokens to extract [%eval] annotations
+  const tokens = text.match(/\{[^}]*\}|[()]|\d+\.+|[A-Za-z][A-Za-z0-9+#=\-]*/g) ?? []
+  const db: TheoryDB = {}
+
+  let lastAddedMove: TheoryMove | null = null
+
+  function addMove(fen: string, san: string) {
+    if (!db[fen]) db[fen] = { opening: varName, moves: [] }
+    const existing = db[fen].moves.find((m) => m.move === san)
+    if (existing) { lastAddedMove = existing; return }
+    const m: TheoryMove = { move: san, variation: varName }
+    db[fen].moves.push(m)
+    lastAddedMove = m
+  }
+
+  function walk(idx: number, chess: Chess, branchFen: string | null): number {
+    let prevFen = branchFen
+    while (idx < tokens.length) {
+      const tok = tokens[idx]
+      if (tok === ')') return idx + 1
+      if (tok === '(') {
+        const savedLast = lastAddedMove
+        if (prevFen !== null) {
+          idx = walk(idx + 1, new Chess(prevFen), null)
+        } else {
+          // No branch point yet — skip to matching ')'
+          let depth = 1; idx++
+          while (idx < tokens.length && depth > 0) {
+            if (tokens[idx] === '(') depth++
+            else if (tokens[idx] === ')') depth--
+            idx++
+          }
+        }
+        lastAddedMove = savedLast
+        continue
+      }
+      if (tok.startsWith('{')) {
+        // Extract Stockfish eval: [%eval N.NN] — skip mate scores like #3
+        const m = tok.match(/\[%eval\s+([+\-]?\d+\.?\d*)\]/)
+        if (m && lastAddedMove) {
+          const val = parseFloat(m[1])
+          if (!isNaN(val)) lastAddedMove.eval = Math.round(val * 100)
+        }
+        idx++
+        continue
+      }
+      if (/^\d+\./.test(tok)) { idx++; continue }
+      // SAN move
+      const before = chess.fen()
+      try {
+        chess.move(tok)
+        addMove(before, tok)
+        prevFen = before
+      } catch { /* skip invalid token */ }
+      idx++
+    }
+    return idx
+  }
+
+  walk(0, new Chess(), null)
+  return db
 }
 
 function extractPgnName(pgn: string): string {
@@ -314,20 +367,18 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
   // ── import helpers ─────────────────────────────────────────────────────────
 
   function loadFromPgn(varName: string, pgn: string) {
-    const moves = parsePgnMoves(pgn)
-    const chess = new Chess()
-    const newDb: TheoryDB = {}
+    const newDb = parsePgnToDb(pgn, varName)
+    // Build main-line path by following the first move of each node
     const newPath: PathStep[] = []
-    for (const san of moves) {
-      const before = chess.fen()
-      if (!newDb[before]) newDb[before] = { opening: varName, moves: [] }
-      try { chess.move(san) } catch { break }
-      const after = chess.fen()
-      if (!newDb[before].moves.some((m) => m.move === san))
-        newDb[before].moves.push({ move: san, variation: varName })
-      newPath.push({ before, move: san, after })
+    let fen = START_FEN
+    const seen = new Set<string>()
+    while (newDb[fen]?.moves.length && !seen.has(fen)) {
+      seen.add(fen)
+      const san = newDb[fen].moves[0].move
+      const after = playFen(fen, san)
+      newPath.push({ before: fen, move: san, after })
+      fen = after
     }
-    // Strip "Root: " prefix for the editor name
     const displayName = varName.includes(':') ? varName.split(':').slice(1).join(':').trim() : varName
     setName(displayName)
     setDb(newDb)
@@ -351,10 +402,11 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
   function handleLoadPgn() {
     const trimmed = pgnText.trim()
     if (!trimmed) { setPgnError('Paste or upload a PGN first.'); return }
-    const moves = parsePgnMoves(trimmed)
-    if (moves.length === 0) { setPgnError('No valid moves found in the PGN.'); return }
     const detected = extractPgnName(trimmed)
-    loadFromPgn(detected || name, trimmed)
+    const varName = detected || name
+    const newDb = parsePgnToDb(trimmed, varName)
+    if (Object.keys(newDb).length === 0) { setPgnError('No valid moves found in the PGN.'); return }
+    loadFromPgn(varName, trimmed)
     setPgnText('')
     setPgnError('')
   }

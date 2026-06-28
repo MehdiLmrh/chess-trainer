@@ -38,6 +38,9 @@ export default function App() {
   const [mainLineOnly, setMainLineOnly] = useState(false)
   const [deckProgress, setDeckProgress] = useState<{ index: number; total: number } | null>(null)
   const [selectedVariations, setSelectedVariations] = useState<Set<string>>(new Set())
+  const [useEvalThresholds, setUseEvalThresholds] = useState(false)
+  const [ownThresholdCp, setOwnThresholdCp] = useState(30)
+  const [opponentThresholdCp, setOpponentThresholdCp] = useState(50)
   const lastDrawnRef              = useRef('')
   const sessionQueueRef           = useRef<DeckEntry[]>([])
   const sessionPosRef             = useRef(0)
@@ -269,6 +272,9 @@ export default function App() {
           side={side}
           selectedRoot={selectedRoot}
           deckProgress={deckMode ? deckProgress ?? undefined : undefined}
+          evalConfig={useEvalThresholds
+            ? { ownThreshold: ownThresholdCp, opponentThreshold: opponentThresholdCp }
+            : undefined}
           onCorrect={() => setStatsDB((s) => recordCorrect(s, selectedRoot))}
           onWrong={() => setStatsDB((s) => recordWrong(s, selectedRoot))}
           onEndOfTheory={(isPerfect, variation) =>
@@ -430,6 +436,38 @@ export default function App() {
               </ul>
             </div>
           )}
+
+          <div className="eval-thresholds">
+            <label className="eval-thresholds-toggle">
+              <input
+                type="checkbox"
+                checked={useEvalThresholds}
+                onChange={(e) => setUseEvalThresholds(e.target.checked)}
+              />
+              <strong>Eval-based training</strong>
+              <span className="eval-thresholds-hint">(requires Stockfish-annotated PGN)</span>
+            </label>
+            {useEvalThresholds && (
+              <div className="eval-thresholds-body">
+                <label>
+                  My moves: max <strong>{ownThresholdCp} cp</strong> drop
+                  <input
+                    type="range" min={0} max={100} step={5}
+                    value={ownThresholdCp}
+                    onChange={(e) => setOwnThresholdCp(Number(e.target.value))}
+                  />
+                </label>
+                <label>
+                  Opponent moves: max <strong>{opponentThresholdCp} cp</strong> drop
+                  <input
+                    type="range" min={0} max={200} step={10}
+                    value={opponentThresholdCp}
+                    onChange={(e) => setOpponentThresholdCp(Number(e.target.value))}
+                  />
+                </label>
+              </div>
+            )}
+          </div>
 
           <div className="side-picker">
             <button className={side === 'white' ? 'active' : ''} onClick={() => setSide('white')}>
