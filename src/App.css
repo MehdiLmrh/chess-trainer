@@ -922,6 +922,22 @@
   background: rgba(46, 204, 113, 0.1);
 }
 
+.delete-line-btn {
+  padding: 0.6rem 1.4rem;
+  border: 2px solid #555;
+  border-radius: 6px;
+  background: transparent;
+  color: #888;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.delete-line-btn:hover {
+  border-color: #e74c3c;
+  color: #e74c3c;
+}
+
 /* ── Deck screen ──────────────────────────────── */
 
 .deck-screen {
@@ -1059,6 +1075,44 @@
 
 .deck-item-excluded {
   opacity: 0.3;
+}
+
+.deck-entry-side {
+  display: flex;
+  gap: 1px;
+  margin-left: auto;
+}
+
+.deck-entry-side-btn {
+  padding: 0.1rem 0.38rem;
+  border: 1px solid #333;
+  background: transparent;
+  color: #555;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.1s, background 0.1s, border-color 0.1s;
+  line-height: 1.4;
+}
+
+.deck-entry-side-btn:first-child { border-radius: 4px 0 0 4px; }
+.deck-entry-side-btn:last-child  { border-radius: 0 4px 4px 0; }
+
+.deck-entry-side-btn:hover {
+  color: #aaa;
+  border-color: #555;
+}
+
+.deck-entry-side-btn.active {
+  background: #7c83fd;
+  border-color: #7c83fd;
+  color: #fff;
+}
+
+.deck-entry-side-btn.inherited {
+  border-color: #383858;
+  color: #7c83fd;
+  background: rgba(124, 131, 253, 0.08);
 }
 
 .deck-filter-count {

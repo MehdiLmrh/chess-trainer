@@ -1,5 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import type { MoveRecord } from '../hooks/useTrainer'
+
+function deleteLine(db: TheoryDB, fenHistory: string[], moveHistory: MoveRecord[]): TheoryDB {
+  const result = { ...db }
+  for (let i = moveHistory.length - 1; i >= 0; i--) {
+    const fen = fenHistory[i]
+    const rec = moveHistory[i]
+    const node = result[fen]
+    if (!node) break
+    const chess = new Chess(fen)
+    let san: string | null = null
+    try { san = chess.move({ from: rec.from, to: rec.to, promotion: 'q' })?.san ?? null } catch {}
+    if (!san) break
+    const remaining = node.moves.filter(m => m.move !== san)
+    if (remaining.length === 0) {
+      delete result[fen]
+    } else {
+      result[fen] = { ...node, moves: remaining }
+      break
+    }
+  }
+  return result
+}
+
 function fmtEval(cp: number): string {
   const p = cp / 100
   return (p > 0 ? '+' : '') + p.toFixed(2)
@@ -50,12 +74,13 @@ interface Props {
   onReset: () => void
   onBack: () => void
   onNext?: () => void
+  onDeleteLine?: (newDb: TheoryDB) => void
 }
 
 export function Trainer({
   db, side, selectedRoot, deckProgress, evalConfig,
   onCorrect, onWrong, onEndOfTheory,
-  onExclude, onReset, onBack, onNext,
+  onExclude, onReset, onBack, onNext, onDeleteLine,
 }: Props) {
   const [streak, setStreak] = useState(0)
   const [mistakes, setMistakes] = useState(0)
@@ -340,6 +365,15 @@ export function Trainer({
         )}
         {isComplete && onNext && (
           <button className="next-btn" onClick={onNext}>Next Opening →</button>
+        )}
+        {isComplete && onDeleteLine && (
+          <button
+            className="delete-line-btn"
+            title="Remove this line from your repertoire"
+            onClick={() => onDeleteLine(deleteLine(db, fenHistory, moveHistory))}
+          >
+            Delete line
+          </button>
         )}
         <button className="reset-btn" onClick={onReset}>Reset</button>
         <button className="back-btn" onClick={onBack}>← Back</button>

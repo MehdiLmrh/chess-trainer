@@ -2,28 +2,37 @@ import { useState } from 'react'
 import { Stars } from './Stars'
 import { starLevel } from '../stats'
 import type { StatsDB } from '../stats'
-import type { Deck, DeckEntry } from '../deck'
-import type { Side } from '../types'
+import type { Deck, DeckEntry, DeckSide } from '../deck'
 
 const FILTERS = [
-  { label: 'All',      maxPerfect: Infinity },
+  { label: 'All',       maxPerfect: Infinity },
   { label: '0 perfect', maxPerfect: 1 },
-  { label: '< 5',      maxPerfect: 5 },
+  { label: '< 5',       maxPerfect: 5 },
 ] as const
+
+const SIDE_OPTIONS: { label: string; value: DeckSide }[] = [
+  { label: 'White', value: 'white' },
+  { label: 'Black', value: 'black' },
+  { label: 'Both',  value: 'both'  },
+]
 
 interface Props {
   deck: Deck
-  side: Side
+  deckSide: DeckSide
   statsDB: StatsDB
   mainLineOnly: boolean
   onBack: () => void
   onRemove: (entry: DeckEntry) => void
-  onSetSide: (side: Side) => void
+  onSetDeckSide: (side: DeckSide) => void
+  onSetEntrySide: (entry: DeckEntry, side: DeckSide) => void
   onSetMainLineOnly: (v: boolean) => void
   onStart: (filtered: DeckEntry[]) => void
 }
 
-export function DeckScreen({ deck, side, statsDB, mainLineOnly, onBack, onRemove, onSetSide, onSetMainLineOnly, onStart }: Props) {
+export function DeckScreen({
+  deck, deckSide, statsDB, mainLineOnly,
+  onBack, onRemove, onSetDeckSide, onSetEntrySide, onSetMainLineOnly, onStart,
+}: Props) {
   const [maxPerfect, setMaxPerfect] = useState<number>(Infinity)
 
   const filtered = deck.filter((entry) => (statsDB[entry.rootName]?.perfect ?? 0) < maxPerfect)
@@ -70,10 +79,25 @@ export function DeckScreen({ deck, side, statsDB, mainLineOnly, onBack, onRemove
             </button>
           </div>
 
+          {/* Default side for all entries */}
+          <div className="deck-filter">
+            <span className="deck-filter-label">Default side:</span>
+            {SIDE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                className={`deck-filter-btn${deckSide === opt.value ? ' active' : ''}`}
+                onClick={() => onSetDeckSide(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
           <ul className="deck-list">
             {deck.map((entry) => {
               const excluded = (statsDB[entry.rootName]?.perfect ?? 0) >= maxPerfect
               const key = entry.customId ?? entry.rootName
+              const effectiveSide: DeckSide = entry.side ?? deckSide
               return (
                 <li key={key} className={`deck-item${excluded ? ' deck-item-excluded' : ''}`}>
                   <span className="deck-item-name">{entry.rootName}</span>
@@ -85,6 +109,21 @@ export function DeckScreen({ deck, side, statsDB, mainLineOnly, onBack, onRemove
                       {entry.variations.length} var{entry.variations.length !== 1 ? 's' : ''}
                     </span>
                   )}
+
+                  {/* Per-entry side selector */}
+                  <div className="deck-entry-side">
+                    {SIDE_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        title={`Play as ${opt.label}`}
+                        className={`deck-entry-side-btn${effectiveSide === opt.value ? ' active' : ''}${entry.side === undefined && opt.value === deckSide ? ' inherited' : ''}`}
+                        onClick={() => onSetEntrySide(entry, opt.value)}
+                      >
+                        {opt.value === 'white' ? 'W' : opt.value === 'black' ? 'B' : '±'}
+                      </button>
+                    ))}
+                  </div>
+
                   <Stars level={starLevel(statsDB[entry.rootName])} />
                   <button
                     className="deck-remove-btn"
@@ -106,16 +145,8 @@ export function DeckScreen({ deck, side, statsDB, mainLineOnly, onBack, onRemove
 
           <p className="deck-hint">
             Openings with fewer perfect runs are drawn more often.
+            Entries set to <strong>±</strong> train as both White and Black.
           </p>
-
-          <div className="side-picker">
-            <button className={side === 'white' ? 'active' : ''} onClick={() => onSetSide('white')}>
-              Play White
-            </button>
-            <button className={side === 'black' ? 'active' : ''} onClick={() => onSetSide('black')}>
-              Play Black
-            </button>
-          </div>
 
           <button className="start-btn" disabled={filtered.length === 0} onClick={() => onStart(filtered)}>
             Start Practice{filtered.length < deck.length ? ` (${filtered.length})` : ''}

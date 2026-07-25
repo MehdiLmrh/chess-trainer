@@ -8,8 +8,8 @@ import { DeckScreen } from './components/Deck'
 import { Editor } from './components/Editor'
 import { loadStats, recordStart, recordCorrect, recordWrong, recordComplete, type StatsDB } from './stats'
 import { loadExclusions, addExclusion, removeExclusion, type ExclusionsDB } from './exclusions'
-import { loadDeck, addToDeck, removeFromDeck, addCustomToDeck, removeCustomFromDeck, buildSessionQueue, type Deck, type DeckEntry } from './deck'
-import { loadCustomOpenings, type CustomOpening } from './customOpenings'
+import { loadDeck, addToDeck, removeFromDeck, addCustomToDeck, removeCustomFromDeck, buildSessionQueue, setDeckEntrySide, type Deck, type DeckEntry, type DeckSide } from './deck'
+import { loadCustomOpenings, saveCustomOpening, type CustomOpening } from './customOpenings'
 import type { Opening } from './data/lichess'
 import type { Side, TheoryDB } from './types'
 import './App.css'
@@ -38,6 +38,7 @@ export default function App() {
   const [mainLineOnly, setMainLineOnly] = useState(false)
   const [deckProgress, setDeckProgress] = useState<{ index: number; total: number } | null>(null)
   const [selectedVariations, setSelectedVariations] = useState<Set<string>>(new Set())
+  const [deckSide, setDeckSide] = useState<DeckSide>('black')
   const [useEvalThresholds, setUseEvalThresholds] = useState(false)
   const [ownThresholdCp, setOwnThresholdCp] = useState(30)
   const [opponentThresholdCp, setOpponentThresholdCp] = useState(50)
@@ -106,6 +107,8 @@ export default function App() {
     sessionPosRef.current = pos + 1
     setDeckProgress({ index: pos + 1, total: queue.length })
     lastDrawnRef.current = entry.rootName
+    // entry.side is already resolved to 'white' | 'black' by buildSessionQueue
+    if (entry.side === 'white' || entry.side === 'black') setSide(entry.side)
     let overrideDB: TheoryDB | null = null
     if (entry.customId) {
       overrideDB = customOpenings.find((o) => o.id === entry.customId)?.db ?? null
@@ -117,7 +120,7 @@ export default function App() {
 
   function startDeckSession(filtered: DeckEntry[]) {
     activeDeckRef.current = filtered
-    const queue = buildSessionQueue(filtered, statsDB)
+    const queue = buildSessionQueue(filtered, statsDB, deckSide)
     sessionQueueRef.current = queue
     sessionPosRef.current = 0
     advanceSession(queue, 0)
@@ -127,7 +130,7 @@ export default function App() {
     let pos = sessionPosRef.current
     let queue = sessionQueueRef.current
     if (pos >= queue.length) {
-      queue = buildSessionQueue(activeDeckRef.current, statsDB)
+      queue = buildSessionQueue(activeDeckRef.current, statsDB, deckSide)
       sessionQueueRef.current = queue
       pos = 0
     }
@@ -231,7 +234,7 @@ export default function App() {
     return (
       <DeckScreen
         deck={deck}
-        side={side}
+        deckSide={deckSide}
         statsDB={statsDB}
         onBack={() => setScreen('setup')}
         onRemove={(entry) => setDeck((d) =>
@@ -239,7 +242,8 @@ export default function App() {
             ? removeCustomFromDeck(d, entry.customId)
             : removeFromDeck(d, entry.rootName)
         )}
-        onSetSide={setSide}
+        onSetDeckSide={setDeckSide}
+        onSetEntrySide={(entry, side) => setDeck((d) => setDeckEntrySide(d, entry, side))}
         mainLineOnly={mainLineOnly}
         onSetMainLineOnly={setMainLineOnly}
         onStart={(filtered) => startDeckSession(filtered)}
@@ -289,6 +293,16 @@ export default function App() {
           onReset={handleReset}
           onBack={() => setScreen(deckMode ? 'deck' : 'setup')}
           onNext={deckMode ? drawNext : undefined}
+          onDeleteLine={(newDb) => {
+            setDbOverride(newDb)
+            const custom = customOpenings.find((o) => o.name === selectedRoot)
+            if (custom) {
+              const updated: CustomOpening = { ...custom, db: newDb }
+              setCustomOpenings((prev) => prev.map((o) => o.id === custom.id ? updated : o))
+              saveCustomOpening(updated)
+            }
+            setSessionKey((k) => k + 1)
+          }}
         />
       </>
     )

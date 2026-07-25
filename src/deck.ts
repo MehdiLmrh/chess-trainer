@@ -1,9 +1,12 @@
 import type { StatsDB } from './stats'
 
+export type DeckSide = 'white' | 'black' | 'both'
+
 export interface DeckEntry {
   rootName: string
   variations?: string[]  // undefined = all variations; only for Lichess entries
   customId?: string      // set when this entry refers to a custom opening
+  side?: DeckSide        // per-entry side preference
 }
 
 export type Deck = DeckEntry[]
@@ -53,10 +56,36 @@ export function removeCustomFromDeck(deck: Deck, customId: string): Deck {
   return next
 }
 
-// Builds a one-pass session queue where less-practiced openings come first.
-export function buildSessionQueue(deck: Deck, stats: StatsDB): DeckEntry[] {
+export function setDeckEntrySide(deck: Deck, entry: DeckEntry, side: DeckSide): Deck {
+  const next = deck.map((e) => {
+    const match = entry.customId
+      ? e.customId === entry.customId
+      : e.rootName === entry.rootName && !e.customId
+    return match ? { ...e, side } : e
+  })
+  save(next)
+  return next
+}
+
+// Builds a session queue; 'both' entries are expanded into two (one per side).
+// Returned entries always have side resolved to 'white' | 'black'.
+export function buildSessionQueue(
+  deck: Deck,
+  stats: StatsDB,
+  deckSide: DeckSide = 'black',
+): DeckEntry[] {
   if (deck.length === 0) return []
-  return [...deck]
+  const expanded = deck.flatMap((entry) => {
+    const effective: DeckSide = entry.side ?? deckSide
+    if (effective === 'both') {
+      return [
+        { ...entry, side: 'white' as const },
+        { ...entry, side: 'black' as const },
+      ]
+    }
+    return [{ ...entry, side: effective }]
+  })
+  return [...expanded]
     .map((entry) => ({ entry, sort: (stats[entry.rootName]?.perfect ?? 0) + Math.random() }))
     .sort((a, b) => a.sort - b.sort)
     .map((e) => e.entry)
