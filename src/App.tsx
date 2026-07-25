@@ -313,7 +313,17 @@ export default function App() {
           <div className="divider">your openings</div>
           <div className="presets">
             {customOpenings.map((o) => (
-              <button key={o.id} className="preset-btn preset-btn-custom" onClick={() => beginSession(o.name, o.db)}>
+              <button
+                key={o.id}
+                className={`preset-btn preset-btn-custom${selectedRoot === o.name && dbOverride !== null ? ' selected' : ''}`}
+                onClick={() => {
+                  setSelectedRoot(o.name)
+                  setDbOverride(o.db)
+                  setDeckMode(false)
+                  setSearch('')
+                  setShowSuggestions(false)
+                }}
+              >
                 {o.name}
               </button>
             ))}
@@ -436,7 +446,11 @@ export default function App() {
               </ul>
             </div>
           )}
+        </>
+      )}
 
+      {selectedRoot && (
+        <>
           <div className="eval-thresholds">
             <label className="eval-thresholds-toggle">
               <input
@@ -481,12 +495,12 @@ export default function App() {
           <div className="start-row">
             <button
               className="start-btn"
-              disabled={!selectedRoot || selectedVariations.size === 0}
-              onClick={() => beginSession(selectedRoot, null)}
+              disabled={allVariations.length > 0 && selectedVariations.size === 0}
+              onClick={() => beginSession(selectedRoot, dbOverride)}
             >
               Start Training
             </button>
-            {selectedRoot && (() => {
+            {(() => {
               const isInDeck = deck.some((e) => e.rootName === selectedRoot)
               return (
                 <button
