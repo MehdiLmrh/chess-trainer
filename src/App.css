@@ -778,6 +778,38 @@
 .mls-user:hover { background: #181830; color: #dde0ff; }
 .mls-app:hover  { background: #181830; color: #8888aa; }
 
+/* Eval chip */
+@keyframes eval-slide {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.eval-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.18rem 0.65rem;
+  background: #0a0a1e;
+  border: 1px solid #1c1c34;
+  border-radius: 20px;
+  font-size: 0.82rem;
+  animation: eval-slide 0.18s ease-out both;
+}
+
+.eval-chip-label {
+  color: #3a3a5a;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  user-select: none;
+}
+
+.eval-chip-val {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+}
+
 .history-nav {
   display: flex;
   align-items: center;

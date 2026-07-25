@@ -1,4 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+
+function fmtEval(cp: number): string {
+  const p = cp / 100
+  return (p > 0 ? '+' : '') + p.toFixed(2)
+}
+
+function evalColor(cp: number): string {
+  if (cp > 30) return '#7ecda8'
+  if (cp < -30) return '#e07878'
+  return '#8888bb'
+}
 import { Chess } from 'chess.js'
 import { Chessboard } from 'react-chessboard'
 import type { SquareHandlerArgs } from 'react-chessboard'
@@ -118,11 +129,14 @@ export function Trainer({
       try {
         const r = chess.move({ from: rec.from, to: rec.to, promotion: 'q' })
         if (!r) return null
-        return { san: r.san, isUser: rec.isUserMove, isBest: rec.isBest }
+        return { san: r.san, isUser: rec.isUserMove, isBest: rec.isBest, evalCp: rec.eval }
       } catch { return null }
-    }).filter((x): x is { san: string; isUser: boolean; isBest: boolean } => x !== null),
+    }).filter((x): x is { san: string; isUser: boolean; isBest: boolean; evalCp: number | undefined } => x !== null),
     [fenHistory, moveHistory],
   )
+
+  // Eval of the position currently on the board (the move that led to it)
+  const currentEval = reviewIdx > 0 ? moveHistory[reviewIdx - 1]?.eval : undefined
 
   useEffect(() => {
     if (isLive && moveLogRef.current) {
@@ -273,6 +287,15 @@ export function Trainer({
               </span>
             </span>
           ))}
+        </div>
+      )}
+
+      {currentEval !== undefined && (
+        <div className="eval-chip" key={reviewIdx}>
+          <span className="eval-chip-label">eval</span>
+          <span className="eval-chip-val" style={{ color: evalColor(currentEval) }}>
+            {fmtEval(currentEval)}
+          </span>
         </div>
       )}
 

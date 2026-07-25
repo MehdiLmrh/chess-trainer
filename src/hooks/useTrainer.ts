@@ -9,6 +9,7 @@ export interface MoveRecord {
   to: string
   isUserMove: boolean
   isBest: boolean
+  eval?: number       // centipawns of the resulting position (white's POV)
   bestFrom?: string
   bestTo?: string
 }
@@ -123,7 +124,7 @@ export function useTrainer(
 
     const newFen = chess.current.fen()
     pushFen(newFen)
-    pushRecord({ from: moveResult.from, to: moveResult.to, isUserMove: false, isBest: false })
+    pushRecord({ from: moveResult.from, to: moveResult.to, isUserMove: false, isBest: false, eval: picked.eval })
     variationNameRef.current = picked.variation
     setVariationName(picked.variation)
 
@@ -203,7 +204,7 @@ export function useTrainer(
       }
 
       pushFen(afterFen)
-      pushRecord({ from: moveResult.from, to: moveResult.to, isUserMove: true, isBest, bestFrom, bestTo })
+      pushRecord({ from: moveResult.from, to: moveResult.to, isUserMove: true, isBest, eval: matched.eval, bestFrom, bestTo })
       variationNameRef.current = matched.variation
       setVariationName(matched.variation)
       setFeedback(isBest ? 'correct-best' : 'correct')
@@ -238,7 +239,7 @@ export function useTrainer(
       if (!moveResult) return
       const newFen = chess.current.fen()
       pushFen(newFen)
-      pushRecord({ from: moveResult.from, to: moveResult.to, isUserMove: false, isBest: false })
+      pushRecord({ from: moveResult.from, to: moveResult.to, isUserMove: false, isBest: false, eval: picked.eval })
       setVariationName(picked.variation)
       setHintMoves([])
       setFeedback('idle')
