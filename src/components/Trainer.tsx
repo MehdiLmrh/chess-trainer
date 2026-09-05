@@ -38,8 +38,59 @@ import { Chess } from 'chess.js'
 import { Chessboard } from 'react-chessboard'
 import type { SquareHandlerArgs } from 'react-chessboard'
 import { useTrainer } from '../hooks/useTrainer'
+import { sound } from '../sound'
 import type { TheoryDB, Side } from '../types'
-import type { TrainerConfig } from '../hooks/useTrainer'
+import type { TrainerConfig, DebugInfo, MoveQuality } from '../hooks/useTrainer'
+
+function DebugPanel({ info }: { info: DebugInfo }) {
+  const turn = info.whiteToMove ? 'White' : 'Black'
+  return (
+    <div className="debug-panel">
+      <div className="debug-panel-head">
+        <span>{turn} to move · {info.sideToMoveIsUser ? 'you' : 'opponent'}</span>
+        {info.bestEvalCp !== undefined && <span>best {fmtEval(info.bestEvalCp)}</span>}
+        <span>threshold {isFinite(info.threshold) ? `${info.threshold}cp` : 'off'}</span>
+        <span>{info.moves.length} move{info.moves.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div className="debug-cards">
+        {info.moves.map((m, i) => (
+          <div
+            key={i}
+            className={`debug-card${m.playable ? '' : ' debug-card-weak'}${m.isBest ? ' debug-card-best' : ''}`}
+          >
+            <div className="debug-card-san">
+              <span>{m.san}</span>
+              {m.isBest && <span className="debug-tag">best</span>}
+              {!m.playable && <span className="debug-tag debug-tag-weak">below</span>}
+            </div>
+            <div className="debug-card-row">
+              <span className="debug-k">eval</span>
+              <span
+                className="debug-v"
+                style={{ color: m.evalCp !== undefined ? evalColor(m.evalCp) : '#666' }}
+              >
+                {m.evalCp !== undefined ? fmtEval(m.evalCp) : '—'}
+              </span>
+            </div>
+            <div className="debug-card-row">
+              <span className="debug-k">drop</span>
+              <span className="debug-v">{m.dropCp !== undefined ? `${Math.round(m.dropCp)}cp` : '—'}</span>
+            </div>
+            <div className="debug-card-row">
+              <span className="debug-k">path</span>
+              <span className="debug-v">{m.pathPlies} plies</span>
+            </div>
+            {m.pathLine.length > 0 && (
+              <div className="debug-card-line" title={m.pathLine.join(' ')}>
+                {m.pathLine.join(' ')}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 const FEEDBACK_LABELS: Record<string, string> = {
   idle: '',
@@ -67,7 +118,7 @@ interface Props {
   selectedRoot: string
   deckProgress?: { index: number; total: number }
   evalConfig?: TrainerConfig
-  onCorrect: () => void
+  onCorrect: (quality: MoveQuality) => void
   onWrong: () => void
   onEndOfTheory: (isPerfect: boolean, variation: string) => void
   onExclude: (variation: string) => void
@@ -85,9 +136,9 @@ export function Trainer({
   const [streak, setStreak] = useState(0)
   const [mistakes, setMistakes] = useState(0)
 
-  const wrappedOnCorrect = useCallback(() => {
+  const wrappedOnCorrect = useCallback((quality: MoveQuality) => {
     setStreak(s => s + 1)
-    onCorrect()
+    onCorrect(quality)
   }, [onCorrect])
 
   const wrappedOnWrong = useCallback(() => {
@@ -96,9 +147,12 @@ export function Trainer({
     onWrong()
   }, [onWrong])
 
-  const { fen, fenHistory, moveHistory, feedback, variationName, hintMoves, onUserMove, revealAnswer } = useTrainer(
+  const { fen, fenHistory, moveHistory, feedback, variationName, hintMoves, endReason, debugInfo, onUserMove, revealAnswer, undoMove } = useTrainer(
     db, side, { onCorrect: wrappedOnCorrect, onWrong: wrappedOnWrong, onEndOfTheory }, evalConfig,
   )
+
+  const canUndo = moveHistory.some(m => m.isUserMove)
+  const [showDebug, setShowDebug] = useState(false)
 
   // Board glow ring flash
   const [boardFlash, setBoardFlash] = useState<'correct' | 'wrong' | 'end' | null>(null)
@@ -109,15 +163,29 @@ export function Trainer({
       if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
       setBoardFlash('correct')
       flashTimerRef.current = setTimeout(() => setBoardFlash(null), 800)
+      sound.play(feedback === 'correct-best' ? 'best' : 'correct')
     } else if (feedback === 'wrong' || feedback === 'too-weak') {
       if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
       setBoardFlash('wrong')
       flashTimerRef.current = setTimeout(() => setBoardFlash(null), 700)
+      sound.play(feedback === 'wrong' ? 'wrong' : 'tooWeak')
     } else if (feedback === 'end-of-theory') {
       if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
       setBoardFlash('end')
+      sound.play(mistakes === 0 ? 'completePerfect' : 'complete')
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feedback])
+
+  // Opponent's replies get their own, quieter tick.
+  const moveCountRef = useRef(0)
+  useEffect(() => {
+    if (moveHistory.length > moveCountRef.current) {
+      const last = moveHistory[moveHistory.length - 1]
+      if (last && !last.isUserMove) sound.play('appMove')
+    }
+    moveCountRef.current = moveHistory.length
+  }, [moveHistory])
 
   // Review navigation
   const [reviewIdx, setReviewIdx] = useState(0)
@@ -142,6 +210,27 @@ export function Trainer({
       return next
     })
   }
+
+  const handleUndo = useCallback(() => {
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
+    setBoardFlash(null)
+    setIsReviewing(false)
+    undoMove()
+    sound.play('undo')
+  }, [undoMove])
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (canUndo) handleUndo()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [canUndo, handleUndo])
 
   // Move log — derive SAN notation from stored from/to
   const moveLogRef = useRef<HTMLDivElement>(null)
@@ -340,13 +429,28 @@ export function Trainer({
           onClick={goForward}
           title="Next move (→)"
         >→</button>
+        <button
+          className={`history-nav-btn debug-toggle${showDebug ? ' active' : ''}`}
+          onClick={() => setShowDebug(v => !v)}
+          title="Debug: candidate evals & longest paths"
+        >🐞</button>
       </div>
+
+      {showDebug && isLive && debugInfo && <DebugPanel info={debugInfo} />}
+      {showDebug && isLive && !debugInfo && (
+        <div className="debug-panel debug-panel-empty">No candidate moves at this position.</div>
+      )}
 
       {isComplete ? (
         <div className="completion-panel">
           <div className="completion-title">🏁 Line complete!</div>
           <div className={`completion-sub${mistakes === 0 ? ' completion-perfect' : ' completion-imperfect'}`}>
             {mistakes === 0 ? '★ Perfect — no mistakes' : `${mistakes} mistake${mistakes !== 1 ? 's' : ''}`}
+          </div>
+          <div className="completion-reason">
+            {endReason === 'below-threshold'
+              ? '⚖️ Stopped here — every remaining theory move is below your eval threshold'
+              : '📖 End of the line — no further moves in theory'}
           </div>
         </div>
       ) : (
@@ -373,6 +477,15 @@ export function Trainer({
             onClick={() => onDeleteLine(deleteLine(db, fenHistory, moveHistory))}
           >
             Delete line
+          </button>
+        )}
+        {canUndo && (
+          <button
+            className="undo-btn"
+            title="Undo my last move (Ctrl+Z)"
+            onClick={handleUndo}
+          >
+            ↶ Undo move
           </button>
         )}
         <button className="reset-btn" onClick={onReset}>Reset</button>

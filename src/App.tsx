@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchOpenings, getRootNames, getVariations, buildTheoryDB, filterDB, getCleanupStats, type CleanupStats } from './data/lichess'
-import { PRESETS } from './data/presets'
 import { Trainer } from './components/Trainer'
 import { Profile } from './components/Profile'
 import { Explorer } from './components/Explorer'
@@ -10,11 +9,14 @@ import { loadStats, recordStart, recordCorrect, recordWrong, recordComplete, typ
 import { loadExclusions, addExclusion, removeExclusion, type ExclusionsDB } from './exclusions'
 import { loadDeck, addToDeck, removeFromDeck, addCustomToDeck, removeCustomFromDeck, buildSessionQueue, setDeckEntrySide, type Deck, type DeckEntry, type DeckSide } from './deck'
 import { loadCustomOpenings, saveCustomOpening, type CustomOpening } from './customOpenings'
+import { sound } from './sound'
+import { RunHud, RunSummary } from './components/Run'
+import { initialRunStats, pointsForMove, type RunStats } from './run'
 import type { Opening } from './data/lichess'
 import type { Side, TheoryDB } from './types'
 import './App.css'
 
-type Screen = 'setup' | 'trainer' | 'profile' | 'explorer' | 'deck' | 'editor'
+type Screen = 'setup' | 'trainer' | 'profile' | 'explorer' | 'deck' | 'editor' | 'run-summary'
 
 export default function App() {
   const [screen, setScreen]       = useState<Screen>('setup')
@@ -42,16 +44,33 @@ export default function App() {
   const [useEvalThresholds, setUseEvalThresholds] = useState(false)
   const [ownThresholdCp, setOwnThresholdCp] = useState(30)
   const [opponentThresholdCp, setOpponentThresholdCp] = useState(50)
+  const [sfxOn, setSfxOn]         = useState(() => sound.isSfxOn())
+  const [musicOn, setMusicOn]     = useState(() => sound.isMusicOn())
+  const [runMode, setRunMode]     = useState(false)
+  const [runStats, setRunStats]   = useState<RunStats>(initialRunStats)
   const lastDrawnRef              = useRef('')
   const sessionQueueRef           = useRef<DeckEntry[]>([])
   const sessionPosRef             = useRef(0)
   const activeDeckRef             = useRef<DeckEntry[]>([])
+  const lastRunDeckRef            = useRef<DeckEntry[]>([])
   const inputRef                  = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     fetchOpenings()
       .then((o) => { setOpenings(o); setCleanupStats(getCleanupStats()) })
       .catch(() => setLoadError('Failed to load openings. Check your connection.'))
+  }, [])
+
+  // Browsers require a user gesture before audio can play — unlock on the
+  // first click/keypress anywhere in the app.
+  useEffect(() => {
+    function unlock() { sound.unlock() }
+    window.addEventListener('pointerdown', unlock)
+    window.addEventListener('keydown', unlock)
+    return () => {
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
+    }
   }, [])
 
   const rootNames = useMemo(() => getRootNames(openings, minMoves), [openings, minMoves])
@@ -126,6 +145,18 @@ export default function App() {
     advanceSession(queue, 0)
   }
 
+  function startRunSession(filtered: DeckEntry[]) {
+    if (filtered.length === 0) return
+    lastRunDeckRef.current = filtered
+    setRunMode(true)
+    setRunStats(initialRunStats())
+    startDeckSession(filtered)
+  }
+
+  function retryRun() {
+    startRunSession(lastRunDeckRef.current)
+  }
+
   function drawNext() {
     let pos = sessionPosRef.current
     let queue = sessionQueueRef.current
@@ -170,6 +201,20 @@ export default function App() {
 
   const navBtns = screen !== 'profile' && screen !== 'explorer' && screen !== 'deck' && screen !== 'editor' && (
     <div className="nav-btns">
+      <button
+        className={`nav-btn sound-btn${sfxOn ? ' active' : ''}`}
+        title={sfxOn ? 'Sound effects on' : 'Sound effects off'}
+        onClick={() => { const next = !sfxOn; setSfxOn(next); sound.setSfxOn(next); if (next) sound.play('move') }}
+      >
+        {sfxOn ? '🔊' : '🔇'}
+      </button>
+      <button
+        className={`nav-btn sound-btn${musicOn ? ' active' : ''}`}
+        title={musicOn ? 'Music on' : 'Music off'}
+        onClick={() => { const next = !musicOn; setMusicOn(next); sound.setMusicOn(next) }}
+      >
+        🎵
+      </button>
       <button className="nav-btn" onClick={() => setScreen('deck')}>
         Deck{deck.length > 0 ? ` (${deck.length})` : ''}
       </button>
@@ -247,6 +292,7 @@ export default function App() {
         mainLineOnly={mainLineOnly}
         onSetMainLineOnly={setMainLineOnly}
         onStart={(filtered) => startDeckSession(filtered)}
+        onStartRun={(filtered) => startRunSession(filtered)}
       />
     )
   }
@@ -266,10 +312,21 @@ export default function App() {
     )
   }
 
+  if (screen === 'run-summary') {
+    return (
+      <RunSummary
+        stats={runStats}
+        onRetry={retryRun}
+        onBack={() => { setRunMode(false); setScreen('setup') }}
+      />
+    )
+  }
+
   if (screen === 'trainer') {
     return (
       <>
         {navBtns}
+        {runMode && <RunHud stats={runStats} />}
         <Trainer
           key={sessionKey}
           db={db}
@@ -279,19 +336,47 @@ export default function App() {
           evalConfig={useEvalThresholds
             ? { ownThreshold: ownThresholdCp, opponentThreshold: opponentThresholdCp }
             : undefined}
-          onCorrect={() => setStatsDB((s) => recordCorrect(s, selectedRoot))}
-          onWrong={() => setStatsDB((s) => recordWrong(s, selectedRoot))}
-          onEndOfTheory={(isPerfect, variation) =>
+          onCorrect={(quality) => {
+            setStatsDB((s) => recordCorrect(s, selectedRoot))
+            if (runMode) {
+              setRunStats((r) => {
+                const combo = r.combo + 1
+                return {
+                  ...r,
+                  score: r.score + pointsForMove(quality),
+                  correctMoves: r.correctMoves + 1,
+                  combo,
+                  bestCombo: Math.max(r.bestCombo, combo),
+                }
+              })
+            }
+          }}
+          onWrong={() => {
+            setStatsDB((s) => recordWrong(s, selectedRoot))
+            if (runMode) {
+              const lives = runStats.lives - 1
+              setRunStats((r) => ({ ...r, lives, combo: 0 }))
+              if (lives <= 0) {
+                sound.play('gameOver')
+                setTimeout(() => setScreen('run-summary'), 650)
+              }
+            }
+          }}
+          onEndOfTheory={(isPerfect, variation) => {
             setStatsDB((s) => {
               let next = recordComplete(s, selectedRoot, isPerfect)
               if (variation && variation !== selectedRoot)
                 next = recordComplete(next, variation, isPerfect)
               return next
             })
-          }
+            if (runMode) setRunStats((r) => ({ ...r, openingsCleared: r.openingsCleared + 1 }))
+          }}
           onExclude={handleExclude}
           onReset={handleReset}
-          onBack={() => setScreen(deckMode ? 'deck' : 'setup')}
+          onBack={() => {
+            if (runMode) { setRunMode(false); setScreen('setup') }
+            else setScreen(deckMode ? 'deck' : 'setup')
+          }}
           onNext={deckMode ? drawNext : undefined}
           onDeleteLine={(newDb) => {
             setDbOverride(newDb)
@@ -314,38 +399,59 @@ export default function App() {
       {navBtns}
       <h1>Chess Theory Trainer</h1>
 
-      <div className="presets">
-        {PRESETS.map((p) => (
-          <button key={p.label} className="preset-btn" onClick={() => beginSession(p.label, p.db)}>
-            {p.label}
-          </button>
-        ))}
+      <div className="deck-panel">
+        {deck.length > 0 ? (
+          <>
+            <div className="deck-panel-head">
+              <span className="deck-panel-title">Your deck</span>
+              <span className="deck-panel-count">
+                {deck.length} opening{deck.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            <div className="deck-panel-side">
+              {([['white', 'White'], ['black', 'Black'], ['both', 'Both']] as [DeckSide, string][]).map(
+                ([value, label]) => (
+                  <button
+                    key={value}
+                    className={deckSide === value ? 'active' : ''}
+                    onClick={() => setDeckSide(value)}
+                  >
+                    {label}
+                  </button>
+                ),
+              )}
+            </div>
+            <div className="deck-panel-actions">
+              <button
+                className="start-btn"
+                disabled={openings.length === 0 && deck.some((e) => !e.customId)}
+                onClick={() => startDeckSession(deck)}
+              >
+                ▶ Start Deck Practice
+              </button>
+              <button
+                className="run-btn"
+                disabled={openings.length === 0 && deck.some((e) => !e.customId)}
+                title="3 lives — cycle the deck until you run out"
+                onClick={() => startRunSession(deck)}
+              >
+                🏃 Start Run (3 lives)
+              </button>
+              <button className="deck-manage-btn" onClick={() => setScreen('deck')}>
+                Manage deck →
+              </button>
+            </div>
+          </>
+        ) : (
+          <p className="deck-panel-empty">
+            Your deck is empty. Search an opening below, or open the{' '}
+            <button className="link-btn" onClick={() => setScreen('explorer')}>Explorer</button>{' '}
+            to add lines.
+          </p>
+        )}
       </div>
 
-      {customOpenings.length > 0 && (
-        <>
-          <div className="divider">your openings</div>
-          <div className="presets">
-            {customOpenings.map((o) => (
-              <button
-                key={o.id}
-                className={`preset-btn preset-btn-custom${selectedRoot === o.name && dbOverride !== null ? ' selected' : ''}`}
-                onClick={() => {
-                  setSelectedRoot(o.name)
-                  setDbOverride(o.db)
-                  setDeckMode(false)
-                  setSearch('')
-                  setShowSuggestions(false)
-                }}
-              >
-                {o.name}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-
-      <div className="divider">or search</div>
+      <div className="divider">or train a single opening</div>
 
       {loadError && <p className="error">{loadError}</p>}
       {openings.length === 0 && !loadError && <p className="loading">Loading openings…</p>}

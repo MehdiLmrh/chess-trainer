@@ -29,7 +29,7 @@ The **Chess Theory Trainer** is a minimalist, focused application designed to bu
 src/
 ├── types.ts                  # TheoryDB, TheoryNode, TheoryMove, Side, FeedbackStatus
 ├── data/
-│   └── scandinavian.ts       # Hardcoded Scandinavian Defense theory tree
+│   └── lichess.ts            # Lichess opening DB fetch + TheoryDB builder
 ├── hooks/
 │   └── useTrainer.ts         # Core game loop (FEN lookup, validation, app replies)
 ├── App.tsx                   # Setup screen → board + feedback UI

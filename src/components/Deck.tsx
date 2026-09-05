@@ -27,11 +27,12 @@ interface Props {
   onSetEntrySide: (entry: DeckEntry, side: DeckSide) => void
   onSetMainLineOnly: (v: boolean) => void
   onStart: (filtered: DeckEntry[]) => void
+  onStartRun: (filtered: DeckEntry[]) => void
 }
 
 export function DeckScreen({
   deck, deckSide, statsDB, mainLineOnly,
-  onBack, onRemove, onSetDeckSide, onSetEntrySide, onSetMainLineOnly, onStart,
+  onBack, onRemove, onSetDeckSide, onSetEntrySide, onSetMainLineOnly, onStart, onStartRun,
 }: Props) {
   const [maxPerfect, setMaxPerfect] = useState<number>(Infinity)
 
@@ -148,9 +149,19 @@ export function DeckScreen({
             Entries set to <strong>±</strong> train as both White and Black.
           </p>
 
-          <button className="start-btn" disabled={filtered.length === 0} onClick={() => onStart(filtered)}>
-            Start Practice{filtered.length < deck.length ? ` (${filtered.length})` : ''}
-          </button>
+          <div className="deck-start-row">
+            <button className="start-btn" disabled={filtered.length === 0} onClick={() => onStart(filtered)}>
+              Start Practice{filtered.length < deck.length ? ` (${filtered.length})` : ''}
+            </button>
+            <button
+              className="run-btn"
+              disabled={filtered.length === 0}
+              title="3 lives — cycle the deck until you run out"
+              onClick={() => onStartRun(filtered)}
+            >
+              🏃 Start Run
+            </button>
+          </div>
         </>
       )}
     </div>
