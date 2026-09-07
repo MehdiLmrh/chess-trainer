@@ -147,12 +147,13 @@ export function Trainer({
     onWrong()
   }, [onWrong])
 
+  const [showDebug, setShowDebug] = useState(false)
+
   const { fen, fenHistory, moveHistory, feedback, variationName, hintMoves, endReason, debugInfo, onUserMove, revealAnswer, undoMove } = useTrainer(
-    db, side, { onCorrect: wrappedOnCorrect, onWrong: wrappedOnWrong, onEndOfTheory }, evalConfig,
+    db, side, { onCorrect: wrappedOnCorrect, onWrong: wrappedOnWrong, onEndOfTheory }, evalConfig, showDebug,
   )
 
   const canUndo = moveHistory.some(m => m.isUserMove)
-  const [showDebug, setShowDebug] = useState(false)
 
   // Board glow ring flash
   const [boardFlash, setBoardFlash] = useState<'correct' | 'wrong' | 'end' | null>(null)

@@ -154,9 +154,46 @@ export function useTrainer(
   side: Side,
   callbacks: TrainerCallbacks = {},
   config: TrainerConfig = {},
+  enableDebug = false,
 ) {
   const { ownThreshold = Infinity, opponentThreshold = Infinity } = config
   const chess = useRef(new Chess())
+
+  // Longest-path lookups are memoized per-position, but the walk from near the
+  // root touches the whole tree (~seconds on a big repertoire DB). Persist the
+  // memo across app moves — and across the debug panel — keyed on `db`, so that
+  // cost is paid at most once per session instead of every opponent reply.
+  const pathMemoRef = useRef<{
+    db: TheoryDB
+    memo: Map<string, { plies: number; line: string[] }>
+    warm: boolean
+  }>({ db, memo: new Map(), warm: false })
+  if (pathMemoRef.current.db !== db) {
+    pathMemoRef.current = { db, memo: new Map(), warm: false }
+  }
+
+  // Warm the memo during idle time after mount so opponent-move weighting is
+  // available without a per-move hitch. Until it finishes, replies fall back to
+  // a uniform pick, so nothing blocks on it.
+  useEffect(() => {
+    const startFen = new Chess().fen()
+    const run = () => {
+      const ref = pathMemoRef.current
+      if (ref.db !== db || ref.warm) return
+      longestPathFrom(startFen, db, ref.memo)
+      ref.warm = true
+    }
+    const ric = (window as unknown as {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+    }).requestIdleCallback
+    if (ric) {
+      const id = ric(run, { timeout: 4000 })
+      return () => (window as unknown as { cancelIdleCallback?: (id: number) => void })
+        .cancelIdleCallback?.(id)
+    }
+    const id = setTimeout(run, 800)
+    return () => clearTimeout(id)
+  }, [db])
   const [fen, setFen] = useState(chess.current.fen())
   const [fenHistory, setFenHistory] = useState<string[]>(() => [chess.current.fen()])
   const [moveHistory, setMoveHistory] = useState<MoveRecord[]>([])
@@ -211,12 +248,16 @@ export function useTrainer(
       return
     }
 
-    const pathMemo = new Map<string, { plies: number; line: string[] }>()
-    const picked = pickWeighted(candidates, (m) => {
-      const c = new Chess(currentFen)
-      try { c.move(m.move) } catch { return 1 }
-      return longestPathFrom(c.fen(), db, pathMemo).plies + 1
-    })
+    // Weight toward longer continuations only once the path memo is warm;
+    // until then fall back to a uniform pick so the reply isn't delayed.
+    const ref = pathMemoRef.current
+    const picked = ref.warm
+      ? pickWeighted(candidates, (m) => {
+          const c = new Chess(currentFen)
+          try { c.move(m.move) } catch { return 1 }
+          return longestPathFrom(c.fen(), db, ref.memo).plies + 1
+        })
+      : candidates[Math.floor(Math.random() * candidates.length)]
     const moveResult = chess.current.move(picked.move)
     if (!moveResult) return
 
@@ -377,6 +418,7 @@ export function useTrainer(
   }, [moveHistory, db, clearTimers])
 
   const debugInfo = useMemo<DebugInfo | null>(() => {
+    if (!enableDebug) return null
     const node = db[fen]
     if (!node || node.moves.length === 0) return null
 
@@ -387,7 +429,7 @@ export function useTrainer(
 
     const bestEvalCp = getBestEval(node.moves, whiteToMove)
     const playableSet = new Set(playableMoves(node.moves, whiteToMove, threshold))
-    const memo = new Map<string, { plies: number; line: string[] }>()
+    const memo = pathMemoRef.current.memo
 
     const moves: DebugMoveInfo[] = node.moves.map((m) => {
       const c = new Chess(fen)
@@ -417,7 +459,7 @@ export function useTrainer(
     })
 
     return { fen, whiteToMove, sideToMoveIsUser, threshold, bestEvalCp, moves }
-  }, [db, fen, ownThreshold, opponentThreshold, userIsWhite])
+  }, [enableDebug, db, fen, ownThreshold, opponentThreshold, userIsWhite])
 
   return { fen, fenHistory, moveHistory, feedback, variationName, hintMoves, endReason, debugInfo, onUserMove, revealAnswer, undoMove }
 }
