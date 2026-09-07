@@ -76,11 +76,20 @@ function movesToPgn(moves: string[]): string {
   return moves.map((m, i) => (i % 2 === 0 ? `${Math.floor(i / 2) + 1}. ${m}` : m)).join(' ')
 }
 
+// A transposition-heavy DB has astronomically many root-to-leaf paths, so this
+// enumeration is bounded: it stops after MAX_LINES results or MAX_VISITS dfs
+// steps, whichever comes first.
+const MAX_LINES = 500
+const MAX_VISITS = 15000
+
 function extractLines(db: TheoryDB): string[][] {
   const START_FEN = new Chess().fen()
   const result: string[][] = []
+  let visits = 0
   function dfs(fen: string, moves: string[], seen: Set<string>) {
+    if (result.length >= MAX_LINES || visits >= MAX_VISITS) return
     if (seen.has(fen)) return
+    visits++
     const node = db[fen]
     if (!node || node.moves.length === 0) {
       if (moves.length > 0) result.push(moves)
@@ -88,6 +97,7 @@ function extractLines(db: TheoryDB): string[][] {
     }
     seen.add(fen)
     for (const m of node.moves) {
+      if (result.length >= MAX_LINES || visits >= MAX_VISITS) return
       try {
         const c = new Chess(fen); c.move(m.move)
         dfs(c.fen(), [...moves, m.move], new Set(seen))
@@ -98,7 +108,12 @@ function extractLines(db: TheoryDB): string[][] {
   return result
 }
 
+// Openings past this size are imported repertoires — don't enumerate their
+// lines (freezes the browser, useless in a flat list); show a summary instead.
+const MAX_LISTABLE_POSITIONS = 400
+
 function buildCustomLines(o: CustomOpening): CustomLine[] {
+  if (Object.keys(o.db).length > MAX_LISTABLE_POSITIONS) return []
   const lines = extractLines(o.db)
   return lines.map((moves) => ({
     moves,
@@ -207,6 +222,7 @@ interface Props {
   onTrain: (rootName: string, allowedVariations?: Set<string>) => void
   onTrainCustom: (name: string, db: TheoryDB) => void
   onTrainRepertoire?: (id: string) => void
+  onToggleRepertoireDeck?: (id: string, name: string) => void
   repLoadingId?: string | null
   onEditCustom: (id: string) => void
 }
@@ -215,7 +231,8 @@ interface Props {
 
 export function Explorer({
   openings, statsDB, deck, customOpenings, cleanupStats,
-  onToggleDeck, onToggleCustomDeck, onBack, onTrain, onTrainCustom, onTrainRepertoire, repLoadingId,
+  onToggleDeck, onToggleCustomDeck, onBack, onTrain, onTrainCustom, onTrainRepertoire,
+  onToggleRepertoireDeck, repLoadingId,
   onEditCustom,
 }: Props) {
   const [search, setSearch]         = useState('')
@@ -241,7 +258,11 @@ export function Explorer({
 
   // Custom: precompute lines, then filter
   const customWithLines = useMemo(
-    () => customOpenings.map((o) => ({ ...o, lines: buildCustomLines(o) })),
+    () => customOpenings.map((o) => ({
+      ...o,
+      lines: buildCustomLines(o),
+      positions: Object.keys(o.db).length,
+    })),
     [customOpenings],
   )
   const visibleCustom = useMemo(
@@ -337,6 +358,7 @@ export function Explorer({
             <div className="explorer-section-header">Eval-guided openings</div>
             {visibleReps.map((r) => {
               const loading = repLoadingId === r.id
+              const inDeck = deck.some((e) => e.customId === r.id)
               return (
                 <div key={r.id} className="tree-node tree-node-repertoire">
                   <div className="tree-root-row">
@@ -344,6 +366,11 @@ export function Explorer({
                     <span className="tree-badges">
                       <span className="tree-count">eval-guided · Black</span>
                     </span>
+                    <button
+                      className={`tree-deck-btn${inDeck ? ' in-deck' : ''}`}
+                      title={inDeck ? 'Remove from deck' : 'Add to deck'}
+                      onClick={() => onToggleRepertoireDeck?.(r.id, r.name)}
+                    >{inDeck ? '✓' : '+'}</button>
                     <button
                       className="tree-train-btn"
                       disabled={loading || repLoadingId != null}
@@ -368,7 +395,11 @@ export function Explorer({
                     <span className="tree-arrow">{isOpen ? '▾' : '▸'}</span>
                     <span className="tree-root-name">{o.name}</span>
                     <span className="tree-badges">
-                      <span className="tree-count">{o.lines.length} line{o.lines.length !== 1 ? 's' : ''}</span>
+                      <span className="tree-count">
+                        {o.lines.length === 0 && o.positions > 0
+                          ? `${o.positions} positions`
+                          : `${o.lines.length} line${o.lines.length !== 1 ? 's' : ''}`}
+                      </span>
                     </span>
                     {(() => {
                       const inDeck = deck.some((e) => e.customId === o.id)
@@ -389,6 +420,12 @@ export function Explorer({
                       onClick={(e) => { e.stopPropagation(); onTrainCustom(o.name, o.db) }}
                     >Train</button>
                   </div>
+
+                  {isOpen && o.lines.length === 0 && o.positions > 0 && (
+                    <p className="tree-oversized-hint">
+                      Too large to list lines here — open in the Editor to browse, or Train it directly.
+                    </p>
+                  )}
 
                   {isOpen && o.lines.length > 0 && (
                     <ul className="tree-children">

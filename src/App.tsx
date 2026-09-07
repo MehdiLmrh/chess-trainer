@@ -13,7 +13,7 @@ import { sound } from './sound'
 import { RunHud, RunSummary } from './components/Run'
 import { initialRunStats, pointsForMove, type RunStats } from './run'
 import { BETA } from './beta'
-import { loadRepertoire } from './data/repertoires'
+import { loadRepertoire, peekRepertoire, isRepertoireId } from './data/repertoires'
 import type { Opening } from './data/lichess'
 import type { Side, TheoryDB } from './types'
 import './App.css'
@@ -50,6 +50,7 @@ export default function App() {
   const [runMode, setRunMode]     = useState(false)
   const [runStats, setRunStats]   = useState<RunStats>(initialRunStats)
   const [repLoading, setRepLoading] = useState<string | null>(null)
+  const [deckStarting, setDeckStarting] = useState(false)
   const lastDrawnRef              = useRef('')
   const sessionQueueRef           = useRef<DeckEntry[]>([])
   const sessionPosRef             = useRef(0)
@@ -66,6 +67,20 @@ export default function App() {
   useEffect(() => {
     initCustomOpenings().then(setCustomOpenings).catch(() => { /* keep empty */ })
   }, [])
+
+  // Warm any bundled repertoires already in the deck so Start Practice / Run
+  // don't stall on a first-time parse.
+  useEffect(() => {
+    if (!BETA) return
+    const id = setTimeout(() => {
+      for (const e of deck) {
+        if (isRepertoireId(e.customId) && !peekRepertoire(e.customId!)) {
+          loadRepertoire(e.customId!).catch(() => { /* retried on demand */ })
+        }
+      }
+    }, 400)
+    return () => clearTimeout(id)
+  }, [deck])
 
   // Browsers require a user gesture before audio can play — unlock on the
   // first click/keypress anywhere in the app.
@@ -150,14 +165,36 @@ export default function App() {
     if (entry.side === 'white' || entry.side === 'black') setSide(entry.side)
     let overrideDB: TheoryDB | null = null
     if (entry.customId) {
-      overrideDB = customOpenings.find((o) => o.id === entry.customId)?.db ?? null
+      overrideDB =
+        customOpenings.find((o) => o.id === entry.customId)?.db ??
+        peekRepertoire(entry.customId)?.db ??
+        null
     } else if (entry.variations) {
       overrideDB = buildTheoryDB(openings, entry.rootName, minMoves, false, new Set(entry.variations))
     }
     beginSession(entry.rootName, overrideDB, true)
   }
 
-  function startDeckSession(filtered: DeckEntry[]) {
+  // Parse any bundled repertoires referenced by these deck entries before a
+  // session starts (parsing is heavy; loadRepertoire memoizes so this is a
+  // no-op once warm).
+  async function ensureDeckRepertoires(entries: DeckEntry[]) {
+    const ids = [...new Set(entries.map((e) => e.customId))].filter(
+      (id): id is string => isRepertoireId(id) && !peekRepertoire(id),
+    )
+    if (ids.length === 0) return
+    setDeckStarting(true)
+    try {
+      await Promise.all(ids.map((id) => loadRepertoire(id).catch(() => null)))
+    } finally {
+      setDeckStarting(false)
+    }
+  }
+
+  async function startDeckSession(filtered: DeckEntry[]) {
+    await ensureDeckRepertoires(filtered)
+    // Eval-guided repertoires in the mix → gate moves by eval for the session.
+    if (filtered.some((e) => isRepertoireId(e.customId))) setUseEvalThresholds(true)
     activeDeckRef.current = filtered
     const queue = buildSessionQueue(filtered, statsDB, deckSide)
     sessionQueueRef.current = queue
@@ -165,16 +202,16 @@ export default function App() {
     advanceSession(queue, 0)
   }
 
-  function startRunSession(filtered: DeckEntry[]) {
+  async function startRunSession(filtered: DeckEntry[]) {
     if (filtered.length === 0) return
     lastRunDeckRef.current = filtered
     setRunMode(true)
     setRunStats(initialRunStats())
-    startDeckSession(filtered)
+    await startDeckSession(filtered)
   }
 
   function retryRun() {
-    startRunSession(lastRunDeckRef.current)
+    void startRunSession(lastRunDeckRef.current)
   }
 
   function drawNext() {
@@ -282,6 +319,12 @@ export default function App() {
         }}
         onTrainCustom={(name, db) => beginSession(name, db)}
         onTrainRepertoire={startRepertoire}
+        onToggleRepertoireDeck={(id, name) => {
+          setDeck((d) => d.some((e) => e.customId === id)
+            ? removeCustomFromDeck(d, id)
+            : addCustomToDeck(d, id, name))
+          if (!peekRepertoire(id)) loadRepertoire(id).catch(() => { /* retried on demand */ })
+        }}
         repLoadingId={repLoading}
         onEditCustom={(id) => {
           setEditorInitialId(id)
@@ -308,8 +351,9 @@ export default function App() {
         onSetEntrySide={(entry, side) => setDeck((d) => setDeckEntrySide(d, entry, side))}
         mainLineOnly={mainLineOnly}
         onSetMainLineOnly={setMainLineOnly}
-        onStart={(filtered) => startDeckSession(filtered)}
-        onStartRun={(filtered) => startRunSession(filtered)}
+        onStart={(filtered) => void startDeckSession(filtered)}
+        onStartRun={(filtered) => void startRunSession(filtered)}
+        starting={deckStarting}
       />
     )
   }
@@ -441,18 +485,18 @@ export default function App() {
             <div className="deck-panel-actions">
               <button
                 className="start-btn"
-                disabled={openings.length === 0 && deck.some((e) => !e.customId)}
-                onClick={() => startDeckSession(deck)}
+                disabled={deckStarting || (openings.length === 0 && deck.some((e) => !e.customId))}
+                onClick={() => void startDeckSession(deck)}
               >
-                ▶ Start Deck Practice
+                {deckStarting ? 'Loading…' : '▶ Start Deck Practice'}
               </button>
               <button
                 className="run-btn"
-                disabled={openings.length === 0 && deck.some((e) => !e.customId)}
+                disabled={deckStarting || (openings.length === 0 && deck.some((e) => !e.customId))}
                 title="3 lives — cycle the deck until you run out"
-                onClick={() => startRunSession(deck)}
+                onClick={() => void startRunSession(deck)}
               >
-                🏃 Start Run (3 lives)
+                {deckStarting ? 'Loading…' : '🏃 Start Run (3 lives)'}
               </button>
               <button className="deck-manage-btn" onClick={() => setScreen('deck')}>
                 Manage deck →

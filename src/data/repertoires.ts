@@ -32,6 +32,15 @@ export function listRepertoires(): RepertoireMeta[] {
 
 const cache = new Map<string, Repertoire>()
 
+export function isRepertoireId(id: string | undefined): id is string {
+  return id !== undefined && LOADERS[id] !== undefined
+}
+
+/** Already-parsed repertoire, or undefined. Synchronous — no fetch/parse. */
+export function peekRepertoire(id: string): Repertoire | undefined {
+  return cache.get(id)
+}
+
 /** Fetch + parse a repertoire's PGN into a theory DB (memoized). */
 export async function loadRepertoire(id: string): Promise<Repertoire> {
   const hit = cache.get(id)

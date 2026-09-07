@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Stars } from './Stars'
 import { starLevel } from '../stats'
+import { isRepertoireId } from '../data/repertoires'
 import type { StatsDB } from '../stats'
 import type { Deck, DeckEntry, DeckSide } from '../deck'
 
@@ -28,11 +29,13 @@ interface Props {
   onSetMainLineOnly: (v: boolean) => void
   onStart: (filtered: DeckEntry[]) => void
   onStartRun: (filtered: DeckEntry[]) => void
+  starting?: boolean
 }
 
 export function DeckScreen({
   deck, deckSide, statsDB, mainLineOnly,
   onBack, onRemove, onSetDeckSide, onSetEntrySide, onSetMainLineOnly, onStart, onStartRun,
+  starting = false,
 }: Props) {
   const [maxPerfect, setMaxPerfect] = useState<number>(Infinity)
 
@@ -103,7 +106,9 @@ export function DeckScreen({
                 <li key={key} className={`deck-item${excluded ? ' deck-item-excluded' : ''}`}>
                   <span className="deck-item-name">{entry.rootName}</span>
                   {entry.customId && (
-                    <span className="deck-item-tag">custom</span>
+                    <span className="deck-item-tag">
+                      {isRepertoireId(entry.customId) ? 'eval' : 'custom'}
+                    </span>
                   )}
                   {!entry.customId && entry.variations && (
                     <span className="deck-item-vars" title={entry.variations.join('\n')}>
@@ -150,16 +155,16 @@ export function DeckScreen({
           </p>
 
           <div className="deck-start-row">
-            <button className="start-btn" disabled={filtered.length === 0} onClick={() => onStart(filtered)}>
-              Start Practice{filtered.length < deck.length ? ` (${filtered.length})` : ''}
+            <button className="start-btn" disabled={filtered.length === 0 || starting} onClick={() => onStart(filtered)}>
+              {starting ? 'Loading…' : `Start Practice${filtered.length < deck.length ? ` (${filtered.length})` : ''}`}
             </button>
             <button
               className="run-btn"
-              disabled={filtered.length === 0}
+              disabled={filtered.length === 0 || starting}
               title="3 lives — cycle the deck until you run out"
               onClick={() => onStartRun(filtered)}
             >
-              🏃 Start Run
+              {starting ? 'Loading…' : '🏃 Start Run'}
             </button>
           </div>
         </>
