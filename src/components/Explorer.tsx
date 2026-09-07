@@ -8,7 +8,7 @@ import { starLevel, type StatsDB } from '../stats'
 import { Stars } from './Stars'
 import type { Deck } from '../deck'
 import type { CustomOpening } from '../customOpenings'
-import type { TheoryDB } from '../types'
+import type { Side, TheoryDB } from '../types'
 
 // ── Tree data (Lichess) ───────────────────────────────────────────────────────
 
@@ -221,7 +221,7 @@ interface Props {
   onBack: () => void
   onTrain: (rootName: string, allowedVariations?: Set<string>) => void
   onTrainCustom: (name: string, db: TheoryDB) => void
-  onTrainRepertoire?: (id: string) => void
+  onTrainRepertoire?: (id: string, side: Side) => void
   onToggleRepertoireDeck?: (id: string, name: string) => void
   repLoadingId?: string | null
   onEditCustom: (id: string) => void
@@ -240,6 +240,7 @@ export function Explorer({
   const [preview, setPreview]       = useState<Preview | null>(null)
   const [viewState, setViewState]   = useState<ViewState | null>(null)
   const [checkedVars, setCheckedVars] = useState<Record<string, Set<string>>>({})
+  const [repSide, setRepSide]       = useState<Record<string, Side>>({})
 
   const tree = useMemo(() => buildTree(openings), [openings])
   const q    = search.toLowerCase().trim()
@@ -359,13 +360,24 @@ export function Explorer({
             {visibleReps.map((r) => {
               const loading = repLoadingId === r.id
               const inDeck = deck.some((e) => e.customId === r.id)
+              const side: Side = repSide[r.id] ?? 'black'
               return (
                 <div key={r.id} className="tree-node tree-node-repertoire">
                   <div className="tree-root-row">
                     <span className="tree-root-name">{r.name}</span>
                     <span className="tree-badges">
-                      <span className="tree-count">eval-guided · Black</span>
+                      <span className="tree-count">eval-guided</span>
                     </span>
+                    <div className="tree-rep-side" title="Side to train">
+                      <button
+                        className={`deck-entry-side-btn${side === 'white' ? ' active' : ''}`}
+                        onClick={() => setRepSide((s) => ({ ...s, [r.id]: 'white' }))}
+                      >W</button>
+                      <button
+                        className={`deck-entry-side-btn${side === 'black' ? ' active' : ''}`}
+                        onClick={() => setRepSide((s) => ({ ...s, [r.id]: 'black' }))}
+                      >B</button>
+                    </div>
                     <button
                       className={`tree-deck-btn${inDeck ? ' in-deck' : ''}`}
                       title={inDeck ? 'Remove from deck' : 'Add to deck'}
@@ -374,7 +386,7 @@ export function Explorer({
                     <button
                       className="tree-train-btn"
                       disabled={loading || repLoadingId != null}
-                      onClick={() => onTrainRepertoire?.(r.id)}
+                      onClick={() => onTrainRepertoire?.(r.id, side)}
                     >{loading ? 'Loading…' : 'Train'}</button>
                   </div>
                 </div>

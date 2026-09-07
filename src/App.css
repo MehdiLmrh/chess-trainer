@@ -1414,6 +1414,12 @@
   color: #8888bb;
 }
 
+.tree-rep-side {
+  display: flex;
+  gap: 1px;
+  flex-shrink: 0;
+}
+
 .tree-edit-btn {
   padding: 0.25rem 0.55rem;
   border: 1px solid #383858;

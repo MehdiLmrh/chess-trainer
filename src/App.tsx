@@ -142,11 +142,11 @@ export default function App() {
   }
 
   // Beta: start an eval-based session from a bundled repertoire PGN.
-  function startRepertoire(id: string) {
+  function startRepertoire(id: string, repSide: Side = 'black') {
     setRepLoading(id)
     loadRepertoire(id)
       .then((rep) => {
-        setSide('black')
+        setSide(repSide)
         setUseEvalThresholds(true)
         setRunMode(false)
         beginSession(rep.name, rep.db)
