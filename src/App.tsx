@@ -8,7 +8,7 @@ import { Editor } from './components/Editor'
 import { loadStats, recordStart, recordCorrect, recordWrong, recordComplete, type StatsDB } from './stats'
 import { loadExclusions, addExclusion, removeExclusion, type ExclusionsDB } from './exclusions'
 import { loadDeck, addToDeck, removeFromDeck, addCustomToDeck, removeCustomFromDeck, buildSessionQueue, setDeckEntrySide, type Deck, type DeckEntry, type DeckSide } from './deck'
-import { loadCustomOpenings, saveCustomOpening, type CustomOpening } from './customOpenings'
+import { initCustomOpenings, getCustomOpenings, saveCustomOpening, type CustomOpening } from './customOpenings'
 import { sound } from './sound'
 import { RunHud, RunSummary } from './components/Run'
 import { initialRunStats, pointsForMove, type RunStats } from './run'
@@ -34,7 +34,7 @@ export default function App() {
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [deck, setDeck]           = useState<Deck>(loadDeck)
   const [deckMode, setDeckMode]   = useState(false)
-  const [customOpenings, setCustomOpenings] = useState<CustomOpening[]>(loadCustomOpenings)
+  const [customOpenings, setCustomOpenings] = useState<CustomOpening[]>(getCustomOpenings)
   const [editorInitialId, setEditorInitialId] = useState<string | null>(null)
   const [editorReturnScreen, setEditorReturnScreen] = useState<Screen>('setup')
   const [mainLineOnly, setMainLineOnly] = useState(false)
@@ -58,6 +58,10 @@ export default function App() {
     fetchOpenings()
       .then((o) => { setOpenings(o); setCleanupStats(getCleanupStats()) })
       .catch(() => setLoadError('Failed to load openings. Check your connection.'))
+  }, [])
+
+  useEffect(() => {
+    initCustomOpenings().then(setCustomOpenings).catch(() => { /* keep empty */ })
   }, [])
 
   // Browsers require a user gesture before audio can play — unlock on the
@@ -230,7 +234,7 @@ export default function App() {
         initialOpening={editorInitialId ? customOpenings.find((o) => o.id === editorInitialId) : null}
         onBack={() => {
           setEditorInitialId(null)
-          setCustomOpenings(loadCustomOpenings())
+          setCustomOpenings(getCustomOpenings())
           setScreen(editorReturnScreen)
         }}
         onTrain={(name, db) => beginSession(name, db)}
@@ -376,7 +380,7 @@ export default function App() {
             if (custom) {
               const updated: CustomOpening = { ...custom, db: newDb }
               setCustomOpenings((prev) => prev.map((o) => o.id === custom.id ? updated : o))
-              saveCustomOpening(updated)
+              saveCustomOpening(updated).catch(() => { /* optimistic update kept */ })
             }
             setSessionKey((k) => k + 1)
           }}

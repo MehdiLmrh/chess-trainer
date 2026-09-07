@@ -3,7 +3,7 @@ import { Chess } from 'chess.js'
 import { Chessboard } from 'react-chessboard'
 import type { SquareHandlerArgs, PieceDropHandlerArgs } from 'react-chessboard'
 import {
-  loadCustomOpenings, saveCustomOpening, deleteCustomOpening,
+  initCustomOpenings, getCustomOpenings, saveCustomOpening, deleteCustomOpening,
   type CustomOpening,
 } from '../customOpenings'
 import type { Opening } from '../data/lichess'
@@ -189,7 +189,7 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
   const [db, setDb]               = useState<TheoryDB>(() => initialOpening?.db ?? {})
   const [path, setPath]           = useState<PathStep[]>([])
   const [orientation, setOrientation] = useState<'white' | 'black'>('white')
-  const [saved, setSaved]         = useState<CustomOpening[]>(loadCustomOpenings)
+  const [saved, setSaved]         = useState<CustomOpening[]>(getCustomOpenings)
   const [editingId, setEditingId] = useState<string | null>(() => initialOpening?.id ?? null)
 
   // Import panel
@@ -208,6 +208,11 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
   const [moveTargets, setMoveTargets]       = useState<{ empty: string[]; capture: string[] }>({ empty: [], capture: [] })
 
   const currentFen = path.length > 0 ? path[path.length - 1].after : START_FEN
+
+  // Custom openings load from IndexedDB asynchronously.
+  useEffect(() => {
+    initCustomOpenings().then(setSaved).catch(() => { /* keep current */ })
+  }, [])
 
   // ── import search results ──────────────────────────────────────────────────
 
@@ -459,14 +464,14 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
     const id  = editingId ?? crypto.randomUUID()
     const tagged = retag(db, name.trim() || 'My Opening')
     const o: CustomOpening = { id, name: name.trim() || 'My Opening', createdAt: Date.now(), db: tagged }
-    try {
-      setSaved(saveCustomOpening(o))
-      setDb(tagged)
-      setEditingId(id)
-      setSaveError('')
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Failed to save.')
-    }
+    setSaveError('')
+    saveCustomOpening(o)
+      .then((all) => {
+        setSaved(all)
+        setDb(tagged)
+        setEditingId(id)
+      })
+      .catch((err) => setSaveError(err instanceof Error ? err.message : 'Failed to save.'))
   }
 
   function handleNew() {
@@ -486,7 +491,7 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
   }
 
   function handleDelete(id: string) {
-    setSaved(deleteCustomOpening(id))
+    deleteCustomOpening(id).then(setSaved).catch(() => { /* ignore */ })
     if (editingId === id) handleNew()
   }
 
