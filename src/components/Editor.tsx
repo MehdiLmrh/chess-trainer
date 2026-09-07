@@ -104,33 +104,43 @@ function playFen(fen: string, san: string): string {
   return c.fen()
 }
 
-function tokenizeDB(db: TheoryDB, fen: string, forceNum: boolean, seen: Set<string>): TreeToken[] {
-  if (seen.has(fen)) return []
+// `seen` is mutated in place and shared across the whole traversal, so every
+// position is emitted at most once — without this, a transposition-heavy DB
+// (e.g. a full French Defense repertoire) blows up into hundreds of thousands
+// of tokens. `budget.left` caps the total token count so a huge import doesn't
+// freeze the render; the board still navigates the full tree.
+function tokenizeDB(
+  db: TheoryDB, fen: string, forceNum: boolean,
+  seen: Set<string>, budget: { left: number },
+): TreeToken[] {
+  if (seen.has(fen) || budget.left <= 0) return []
+  seen.add(fen)
   const node = db[fen]
   if (!node || node.moves.length === 0) return []
   const isWhite = fen.split(' ')[1] === 'w'
   const fullMove = parseInt(fen.split(' ')[5], 10)
   const [main, ...alts] = node.moves
-  const childSeen = new Set([...seen, fen])
   const toks: TreeToken[] = []
-  if (isWhite || forceNum) toks.push({ t: 'num', n: fullMove, black: !isWhite })
+  const push = (t: TreeToken) => { toks.push(t); budget.left-- }
+  if (isWhite || forceNum) push({ t: 'num', n: fullMove, black: !isWhite })
   const mainAfter = playFen(fen, main.move)
-  toks.push({ t: 'move', san: main.move, before: fen, after: mainAfter })
+  push({ t: 'move', san: main.move, before: fen, after: mainAfter })
   for (const alt of alts) {
+    if (budget.left <= 0) break
     const altAfter = playFen(fen, alt.move)
-    toks.push({ t: 'open' })
-    toks.push({ t: 'num', n: fullMove, black: !isWhite })
-    toks.push({ t: 'move', san: alt.move, before: fen, after: altAfter })
-    toks.push(...tokenizeDB(db, altAfter, false, childSeen))
-    toks.push({ t: 'close' })
+    push({ t: 'open' })
+    push({ t: 'num', n: fullMove, black: !isWhite })
+    push({ t: 'move', san: alt.move, before: fen, after: altAfter })
+    toks.push(...tokenizeDB(db, altAfter, false, seen, budget))
+    push({ t: 'close' })
   }
-  toks.push(...tokenizeDB(db, mainAfter, alts.length > 0, childSeen))
+  toks.push(...tokenizeDB(db, mainAfter, alts.length > 0, seen, budget))
   return toks
 }
 
 /** Re-tag every node in the DB with a new opening/variation name. */
 function dbToPgn(db: TheoryDB, openingName: string): string {
-  const tokens = tokenizeDB(db, START_FEN, true, new Set())
+  const tokens = tokenizeDB(db, START_FEN, true, new Set(), { left: Infinity })
   const parts: string[] = []
   for (const tok of tokens) {
     if (tok.t === 'num') parts.push(`${tok.n}${tok.black ? '...' : '.'}`)
@@ -190,6 +200,7 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
   // PGN import
   const [pgnText, setPgnText]   = useState('')
   const [pgnError, setPgnError] = useState('')
+  const [pgnBusy, setPgnBusy]   = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Click-to-move selection
@@ -340,21 +351,25 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
 
   function findPathTo(targetFen: string): PathStep[] | null {
     if (targetFen === START_FEN) return []
-    function dfs(fen: string, acc: PathStep[], seen: Set<string>): PathStep[] | null {
-      if (seen.has(fen)) return null
+    // `visited` is shared: a position that led nowhere on one branch can't
+    // lead to the target on another (the target is fixed), so this is a safe
+    // memo that keeps navigation O(positions) on a large transposing tree.
+    const visited = new Set<string>()
+    function dfs(fen: string, acc: PathStep[]): PathStep[] | null {
+      if (visited.has(fen)) return null
+      visited.add(fen)
       const node = db[fen]
       if (!node) return null
-      const s2 = new Set([...seen, fen])
       for (const m of node.moves) {
         const after = playFen(fen, m.move)
         const step: PathStep = { before: fen, move: m.move, after }
         if (after === targetFen) return [...acc, step]
-        const result = dfs(after, [...acc, step], s2)
+        const result = dfs(after, [...acc, step])
         if (result) return result
       }
       return null
     }
-    return dfs(START_FEN, [], new Set())
+    return dfs(START_FEN, [])
   }
 
   function jumpTo(before: string, san: string) {
@@ -366,8 +381,8 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
 
   // ── import helpers ─────────────────────────────────────────────────────────
 
-  function loadFromPgn(varName: string, pgn: string) {
-    const newDb = parsePgnToDb(pgn, varName)
+  function loadFromPgn(varName: string, pgn: string, prebuilt?: TheoryDB) {
+    const newDb = prebuilt ?? parsePgnToDb(pgn, varName)
     // Build main-line path by following the first move of each node
     const newPath: PathStep[] = []
     let fen = START_FEN
@@ -402,13 +417,25 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
   function handleLoadPgn() {
     const trimmed = pgnText.trim()
     if (!trimmed) { setPgnError('Paste or upload a PGN first.'); return }
-    const detected = extractPgnName(trimmed)
-    const varName = detected || name
-    const newDb = parsePgnToDb(trimmed, varName)
-    if (Object.keys(newDb).length === 0) { setPgnError('No valid moves found in the PGN.'); return }
-    loadFromPgn(varName, trimmed)
-    setPgnText('')
     setPgnError('')
+    setPgnBusy(true)
+    // Yield once so the "Parsing…" state paints before the (blocking) parse of
+    // a potentially multi-MB PGN.
+    setTimeout(() => {
+      try {
+        const detected = extractPgnName(trimmed)
+        const varName = detected || name
+        const newDb = parsePgnToDb(trimmed, varName)
+        if (Object.keys(newDb).length === 0) {
+          setPgnError('No valid moves found in the PGN.')
+          return
+        }
+        loadFromPgn(varName, trimmed, newDb)
+        setPgnText('')
+      } finally {
+        setPgnBusy(false)
+      }
+    }, 20)
   }
 
   function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -426,13 +453,20 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
 
   // ── save / load / new ─────────────────────────────────────────────────────
 
+  const [saveError, setSaveError] = useState('')
+
   function handleSave() {
     const id  = editingId ?? crypto.randomUUID()
     const tagged = retag(db, name.trim() || 'My Opening')
     const o: CustomOpening = { id, name: name.trim() || 'My Opening', createdAt: Date.now(), db: tagged }
-    setSaved(saveCustomOpening(o))
-    setDb(tagged)
-    setEditingId(id)
+    try {
+      setSaved(saveCustomOpening(o))
+      setDb(tagged)
+      setEditingId(id)
+      setSaveError('')
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save.')
+    }
   }
 
   function handleNew() {
@@ -460,7 +494,12 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
 
   const continuations  = db[currentFen]?.moves ?? []
   const positionCount  = Object.keys(db).length
-  const treeTokens     = useMemo(() => tokenizeDB(db, START_FEN, true, new Set()), [db])
+  const TREE_TOKEN_CAP = 4000
+  const treeTokens     = useMemo(
+    () => tokenizeDB(db, START_FEN, true, new Set(), { left: TREE_TOKEN_CAP }),
+    [db],
+  )
+  const treeTruncated  = treeTokens.length >= TREE_TOKEN_CAP
   const pathSet        = useMemo(() => new Set(path.map((s) => `${s.before}\n${s.move}`)), [path])
   const currentKey     = path.length > 0 ? `${path[path.length - 1].before}\n${path[path.length - 1].move}` : ''
 
@@ -574,10 +613,11 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
                 >Upload .pgn</button>
                 <button
                   className="editor-pgn-load-btn"
-                  disabled={!pgnText.trim()}
+                  disabled={!pgnText.trim() || pgnBusy}
                   onClick={handleLoadPgn}
-                >Load</button>
+                >{pgnBusy ? 'Parsing…' : 'Load'}</button>
               </div>
+              {pgnBusy && <p className="editor-import-hint">Parsing a large PGN can take a few seconds…</p>}
               {pgnError && <p className="editor-pgn-error">{pgnError}</p>}
             </>
           )}
@@ -631,6 +671,12 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
                 })
             }
           </div>
+          {treeTruncated && (
+            <p className="editor-hint">
+              Tree view truncated — {positionCount} positions loaded. Use the board and
+              the move list below to navigate the full line.
+            </p>
+          )}
 
           {/* Nav */}
           <div className="editor-nav">
@@ -673,6 +719,7 @@ export function Editor({ side, onSetSide, onBack, onTrain, initialOpening, openi
         >Export PGN</button>
         <button className="editor-new-btn" onClick={handleNew}>New</button>
       </div>
+      {saveError && <p className="editor-pgn-error">{saveError}</p>}
 
       {/* Saved openings */}
       {saved.length > 0 && (

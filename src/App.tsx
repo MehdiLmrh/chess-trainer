@@ -45,7 +45,6 @@ export default function App() {
   const [ownThresholdCp, setOwnThresholdCp] = useState(30)
   const [opponentThresholdCp, setOpponentThresholdCp] = useState(50)
   const [sfxOn, setSfxOn]         = useState(() => sound.isSfxOn())
-  const [musicOn, setMusicOn]     = useState(() => sound.isMusicOn())
   const [runMode, setRunMode]     = useState(false)
   const [runStats, setRunStats]   = useState<RunStats>(initialRunStats)
   const lastDrawnRef              = useRef('')
@@ -207,13 +206,6 @@ export default function App() {
         onClick={() => { const next = !sfxOn; setSfxOn(next); sound.setSfxOn(next); if (next) sound.play('move') }}
       >
         {sfxOn ? '🔊' : '🔇'}
-      </button>
-      <button
-        className={`nav-btn sound-btn${musicOn ? ' active' : ''}`}
-        title={musicOn ? 'Music on' : 'Music off'}
-        onClick={() => { const next = !musicOn; setMusicOn(next); sound.setMusicOn(next) }}
-      >
-        🎵
       </button>
       <button className="nav-btn" onClick={() => setScreen('deck')}>
         Deck{deck.length > 0 ? ` (${deck.length})` : ''}

@@ -14,12 +14,21 @@ export function loadCustomOpenings(): CustomOpening[] {
   catch { return [] }
 }
 
+export class StorageFullError extends Error {}
+
 export function saveCustomOpening(o: CustomOpening): CustomOpening[] {
   const all = loadCustomOpenings()
   const idx = all.findIndex((x) => x.id === o.id)
   if (idx >= 0) all[idx] = o
   else all.push(o)
-  localStorage.setItem(KEY, JSON.stringify(all))
+  try {
+    localStorage.setItem(KEY, JSON.stringify(all))
+  } catch {
+    // Large PGN imports can blow past the ~5 MB localStorage quota.
+    throw new StorageFullError(
+      'Not enough browser storage to save this opening — it may be too large, or you have too many saved.',
+    )
+  }
   return all
 }
 
