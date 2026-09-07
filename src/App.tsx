@@ -13,7 +13,7 @@ import { sound } from './sound'
 import { RunHud, RunSummary } from './components/Run'
 import { initialRunStats, pointsForMove, type RunStats } from './run'
 import { BETA } from './beta'
-import { listRepertoires, loadRepertoire } from './data/repertoires'
+import { loadRepertoire } from './data/repertoires'
 import type { Opening } from './data/lichess'
 import type { Side, TheoryDB } from './types'
 import './App.css'
@@ -281,6 +281,8 @@ export default function App() {
           }
         }}
         onTrainCustom={(name, db) => beginSession(name, db)}
+        onTrainRepertoire={startRepertoire}
+        repLoadingId={repLoading}
         onEditCustom={(id) => {
           setEditorInitialId(id)
           setEditorReturnScreen('explorer')
@@ -413,27 +415,6 @@ export default function App() {
     <div className="setup">
       {navBtns}
       <h1>Chess Theory Trainer</h1>
-
-      {BETA && (
-        <div className="repertoire-panel">
-          <div className="repertoire-panel-head">
-            <span className="repertoire-panel-title">Repertoires</span>
-            <span className="repertoire-panel-sub">eval-guided · you play Black</span>
-          </div>
-          <div className="repertoire-grid">
-            {listRepertoires().map((r) => (
-              <button
-                key={r.id}
-                className="repertoire-btn"
-                disabled={repLoading !== null}
-                onClick={() => startRepertoire(r.id)}
-              >
-                {repLoading === r.id ? 'Loading…' : r.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className="deck-panel">
         {deck.length > 0 ? (

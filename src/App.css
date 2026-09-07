@@ -16,66 +16,6 @@
   background: #333;
 }
 
-/* ── Setup: repertoire panel (beta) ───────── */
-
-.repertoire-panel {
-  width: 100%;
-  max-width: 380px;
-  display: flex;
-  flex-direction: column;
-  gap: 0.8rem;
-  padding: 1.1rem;
-  border: 2px solid #7c83fd;
-  border-radius: 10px;
-  background: #14142e;
-}
-
-.repertoire-panel-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.repertoire-panel-title {
-  font-weight: 700;
-  font-size: 1.05rem;
-  color: #e0e0e0;
-}
-
-.repertoire-panel-sub {
-  font-size: 0.75rem;
-  color: #8888bb;
-}
-
-.repertoire-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
-}
-
-.repertoire-btn {
-  padding: 0.6rem 0.7rem;
-  border: 2px solid #444;
-  border-radius: 6px;
-  background: #12122a;
-  color: #e0e0e0;
-  font-size: 0.9rem;
-  cursor: pointer;
-  text-align: center;
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.repertoire-btn:hover:not(:disabled) {
-  border-color: #7c83fd;
-  background: #2a2a4a;
-}
-
-.repertoire-btn:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
 /* ── Setup: deck panel ────────────────────── */
 
 .deck-panel {
@@ -1461,6 +1401,11 @@
 
 .tree-node-custom > .tree-root-row:hover {
   background: #181832;
+}
+
+.tree-node-repertoire > .tree-root-row {
+  background: #101024;
+  border-left: 2px solid #7c83fd;
 }
 
 .tree-edit-btn {

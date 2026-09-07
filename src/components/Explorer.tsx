@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Chess } from 'chess.js'
 import { Chessboard } from 'react-chessboard'
 import { pgnLength, type Opening, type CleanupStats } from '../data/lichess'
+import { BETA } from '../beta'
+import { listRepertoires } from '../data/repertoires'
 import { starLevel, type StatsDB } from '../stats'
 import { Stars } from './Stars'
 import type { Deck } from '../deck'
@@ -204,6 +206,8 @@ interface Props {
   onBack: () => void
   onTrain: (rootName: string, allowedVariations?: Set<string>) => void
   onTrainCustom: (name: string, db: TheoryDB) => void
+  onTrainRepertoire?: (id: string) => void
+  repLoadingId?: string | null
   onEditCustom: (id: string) => void
 }
 
@@ -211,7 +215,8 @@ interface Props {
 
 export function Explorer({
   openings, statsDB, deck, customOpenings, cleanupStats,
-  onToggleDeck, onToggleCustomDeck, onBack, onTrain, onTrainCustom, onEditCustom,
+  onToggleDeck, onToggleCustomDeck, onBack, onTrain, onTrainCustom, onTrainRepertoire, repLoadingId,
+  onEditCustom,
 }: Props) {
   const [search, setSearch]         = useState('')
   const [openState, setOpenState]   = useState<Record<string, boolean>>({})
@@ -243,6 +248,13 @@ export function Explorer({
     () => !q ? customWithLines : customWithLines.filter((o) => o.name.toLowerCase().includes(q)),
     [customWithLines, q],
   )
+
+  // Eval-guided openings: bundled Stockfish-annotated repertoire PGNs (beta only)
+  const visibleReps = useMemo(() => {
+    if (!BETA) return []
+    const all = listRepertoires()
+    return q ? all.filter((r) => r.name.toLowerCase().includes(q)) : all
+  }, [q])
 
   // Keyboard navigation for viewer
   useEffect(() => {
@@ -298,7 +310,7 @@ export function Explorer({
     setPreview({ fen: pgnToFen(pgn), top, left })
   }
 
-  const noneMatch = visible.length === 0 && visibleCustom.length === 0
+  const noneMatch = visible.length === 0 && visibleCustom.length === 0 && visibleReps.length === 0
 
   return (
     <div className="explorer">
@@ -318,6 +330,31 @@ export function Explorer({
 
       <div className="explorer-tree">
         {noneMatch && <p className="explorer-empty">No openings match.</p>}
+
+        {/* ── Eval-guided openings (bundled repertoires) ──────────── */}
+        {visibleReps.length > 0 && (
+          <>
+            <div className="explorer-section-header">Eval-guided openings</div>
+            {visibleReps.map((r) => {
+              const loading = repLoadingId === r.id
+              return (
+                <div key={r.id} className="tree-node tree-node-repertoire">
+                  <div className="tree-root-row">
+                    <span className="tree-root-name">{r.name}</span>
+                    <span className="tree-badges">
+                      <span className="tree-count">eval-guided · Black</span>
+                    </span>
+                    <button
+                      className="tree-train-btn"
+                      disabled={loading || repLoadingId != null}
+                      onClick={() => onTrainRepertoire?.(r.id)}
+                    >{loading ? 'Loading…' : 'Train'}</button>
+                  </div>
+                </div>
+              )
+            })}
+          </>
+        )}
 
         {/* ── Custom openings section ─────────────────────────────── */}
         {visibleCustom.length > 0 && (
@@ -388,8 +425,8 @@ export function Explorer({
           </>
         )}
 
-        {/* ── Lichess section header (only when both sections visible) ── */}
-        {visibleCustom.length > 0 && visible.length > 0 && (
+        {/* ── Lichess section header (only when another section precedes it) ── */}
+        {visible.length > 0 && (visibleCustom.length > 0 || visibleReps.length > 0) && (
           <div className="explorer-section-header">Opening Database</div>
         )}
 
