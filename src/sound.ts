@@ -1,6 +1,8 @@
 // Retro 16/32-bit style chiptune SFX. Synthesized with the Web Audio API —
 // no asset files, no network fetch. Soundtrack is TODO — designing it later.
 
+import { BETA } from './beta'
+
 export type SfxName =
   | 'move'
   | 'appMove'
@@ -57,6 +59,7 @@ class SoundEngine {
 
   /** Call from any user-gesture handler to unlock/resume the AudioContext. */
   unlock() {
+    if (BETA) return
     this.ensureContext()
   }
 
@@ -148,7 +151,7 @@ class SoundEngine {
   // ── sound effects ────────────────────────────────────────────────────────
 
   play(name: SfxName) {
-    if (!this.sfxOn) return
+    if (BETA || !this.sfxOn) return
     const ctx = this.ensureContext()
     const bus = this.sfxBus
     if (!ctx || !bus) return

@@ -39,6 +39,7 @@ import { Chessboard } from 'react-chessboard'
 import type { SquareHandlerArgs } from 'react-chessboard'
 import { useTrainer } from '../hooks/useTrainer'
 import { sound } from '../sound'
+import { BETA } from '../beta'
 import type { TheoryDB, Side } from '../types'
 import type { TrainerConfig, DebugInfo, MoveQuality } from '../hooks/useTrainer'
 
@@ -430,15 +431,17 @@ export function Trainer({
           onClick={goForward}
           title="Next move (→)"
         >→</button>
-        <button
-          className={`history-nav-btn debug-toggle${showDebug ? ' active' : ''}`}
-          onClick={() => setShowDebug(v => !v)}
-          title="Debug: candidate evals & longest paths"
-        >🐞</button>
+        {!BETA && (
+          <button
+            className={`history-nav-btn debug-toggle${showDebug ? ' active' : ''}`}
+            onClick={() => setShowDebug(v => !v)}
+            title="Debug: candidate evals & longest paths"
+          >🐞</button>
+        )}
       </div>
 
-      {showDebug && isLive && debugInfo && <DebugPanel info={debugInfo} />}
-      {showDebug && isLive && !debugInfo && (
+      {!BETA && showDebug && isLive && debugInfo && <DebugPanel info={debugInfo} />}
+      {!BETA && showDebug && isLive && !debugInfo && (
         <div className="debug-panel debug-panel-empty">No candidate moves at this position.</div>
       )}
 

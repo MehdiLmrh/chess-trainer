@@ -12,6 +12,8 @@ import { initCustomOpenings, getCustomOpenings, saveCustomOpening, type CustomOp
 import { sound } from './sound'
 import { RunHud, RunSummary } from './components/Run'
 import { initialRunStats, pointsForMove, type RunStats } from './run'
+import { BETA } from './beta'
+import { listRepertoires, loadRepertoire } from './data/repertoires'
 import type { Opening } from './data/lichess'
 import type { Side, TheoryDB } from './types'
 import './App.css'
@@ -47,6 +49,7 @@ export default function App() {
   const [sfxOn, setSfxOn]         = useState(() => sound.isSfxOn())
   const [runMode, setRunMode]     = useState(false)
   const [runStats, setRunStats]   = useState<RunStats>(initialRunStats)
+  const [repLoading, setRepLoading] = useState<string | null>(null)
   const lastDrawnRef              = useRef('')
   const sessionQueueRef           = useRef<DeckEntry[]>([])
   const sessionPosRef             = useRef(0)
@@ -121,6 +124,20 @@ export default function App() {
     setStatsDB((s) => recordStart(s, opening))
     setSessionKey((k) => k + 1)
     setScreen('trainer')
+  }
+
+  // Beta: start an eval-based session from a bundled repertoire PGN.
+  function startRepertoire(id: string) {
+    setRepLoading(id)
+    loadRepertoire(id)
+      .then((rep) => {
+        setSide('black')
+        setUseEvalThresholds(true)
+        setRunMode(false)
+        beginSession(rep.name, rep.db)
+      })
+      .catch(() => { /* ignore — button re-enables */ })
+      .finally(() => setRepLoading(null))
   }
 
   function advanceSession(queue: DeckEntry[], pos: number) {
@@ -204,13 +221,15 @@ export default function App() {
 
   const navBtns = screen !== 'profile' && screen !== 'explorer' && screen !== 'deck' && screen !== 'editor' && (
     <div className="nav-btns">
-      <button
-        className={`nav-btn sound-btn${sfxOn ? ' active' : ''}`}
-        title={sfxOn ? 'Sound effects on' : 'Sound effects off'}
-        onClick={() => { const next = !sfxOn; setSfxOn(next); sound.setSfxOn(next); if (next) sound.play('move') }}
-      >
-        {sfxOn ? '🔊' : '🔇'}
-      </button>
+      {!BETA && (
+        <button
+          className={`nav-btn sound-btn${sfxOn ? ' active' : ''}`}
+          title={sfxOn ? 'Sound effects on' : 'Sound effects off'}
+          onClick={() => { const next = !sfxOn; setSfxOn(next); sound.setSfxOn(next); if (next) sound.play('move') }}
+        >
+          {sfxOn ? '🔊' : '🔇'}
+        </button>
+      )}
       <button className="nav-btn" onClick={() => setScreen('deck')}>
         Deck{deck.length > 0 ? ` (${deck.length})` : ''}
       </button>
@@ -394,6 +413,27 @@ export default function App() {
     <div className="setup">
       {navBtns}
       <h1>Chess Theory Trainer</h1>
+
+      {BETA && (
+        <div className="repertoire-panel">
+          <div className="repertoire-panel-head">
+            <span className="repertoire-panel-title">Repertoires</span>
+            <span className="repertoire-panel-sub">eval-guided · you play Black</span>
+          </div>
+          <div className="repertoire-grid">
+            {listRepertoires().map((r) => (
+              <button
+                key={r.id}
+                className="repertoire-btn"
+                disabled={repLoading !== null}
+                onClick={() => startRepertoire(r.id)}
+              >
+                {repLoading === r.id ? 'Loading…' : r.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="deck-panel">
         {deck.length > 0 ? (
