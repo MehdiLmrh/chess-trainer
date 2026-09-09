@@ -225,6 +225,7 @@ interface Props {
   onToggleRepertoireDeck?: (id: string, name: string) => void
   repLoadingId?: string | null
   onEditCustom: (id: string) => void
+  onOpenSettings?: () => void
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -233,7 +234,7 @@ export function Explorer({
   openings, statsDB, deck, customOpenings, cleanupStats,
   onToggleDeck, onToggleCustomDeck, onBack, onTrain, onTrainCustom, onTrainRepertoire,
   onToggleRepertoireDeck, repLoadingId,
-  onEditCustom,
+  onEditCustom, onOpenSettings,
 }: Props) {
   const [search, setSearch]         = useState('')
   const [openState, setOpenState]   = useState<Record<string, boolean>>({})
@@ -339,6 +340,9 @@ export function Explorer({
       <div className="explorer-header">
         <button className="back-btn" onClick={onBack}>← Back</button>
         <h1>Opening Explorer</h1>
+        {onOpenSettings && (
+          <button className="explorer-settings-btn" title="Settings" onClick={onOpenSettings}>⚙</button>
+        )}
       </div>
 
       <input

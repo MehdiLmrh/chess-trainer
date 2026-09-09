@@ -5,6 +5,8 @@ import { Profile } from './components/Profile'
 import { Explorer } from './components/Explorer'
 import { DeckScreen } from './components/Deck'
 import { Editor } from './components/Editor'
+import { Settings } from './components/Settings'
+import { loadEvalSettings, saveEvalSettings } from './settings'
 import { loadStats, recordStart, recordCorrect, recordWrong, recordComplete, type StatsDB } from './stats'
 import { loadExclusions, addExclusion, removeExclusion, type ExclusionsDB } from './exclusions'
 import { loadDeck, addToDeck, removeFromDeck, addCustomToDeck, removeCustomFromDeck, buildSessionQueue, setDeckEntrySide, type Deck, type DeckEntry, type DeckSide } from './deck'
@@ -18,7 +20,7 @@ import type { Opening } from './data/lichess'
 import type { Side, TheoryDB } from './types'
 import './App.css'
 
-type Screen = 'setup' | 'trainer' | 'profile' | 'explorer' | 'deck' | 'editor' | 'run-summary'
+type Screen = 'setup' | 'trainer' | 'profile' | 'explorer' | 'deck' | 'editor' | 'run-summary' | 'settings'
 
 export default function App() {
   const [screen, setScreen]       = useState<Screen>('setup')
@@ -39,13 +41,14 @@ export default function App() {
   const [customOpenings, setCustomOpenings] = useState<CustomOpening[]>(getCustomOpenings)
   const [editorInitialId, setEditorInitialId] = useState<string | null>(null)
   const [editorReturnScreen, setEditorReturnScreen] = useState<Screen>('setup')
+  const [settingsReturnScreen, setSettingsReturnScreen] = useState<'setup' | 'explorer'>('setup')
   const [mainLineOnly, setMainLineOnly] = useState(false)
   const [deckProgress, setDeckProgress] = useState<{ index: number; total: number } | null>(null)
   const [selectedVariations, setSelectedVariations] = useState<Set<string>>(new Set())
   const [deckSide, setDeckSide] = useState<DeckSide>('black')
   const [useEvalThresholds, setUseEvalThresholds] = useState(false)
-  const [ownThresholdCp, setOwnThresholdCp] = useState(30)
-  const [opponentThresholdCp, setOpponentThresholdCp] = useState(50)
+  const [ownThresholdCp, setOwnThresholdCp] = useState(() => loadEvalSettings().ownThresholdCp)
+  const [opponentThresholdCp, setOpponentThresholdCp] = useState(() => loadEvalSettings().opponentThresholdCp)
   const [sfxOn, setSfxOn]         = useState(() => sound.isSfxOn())
   const [runMode, setRunMode]     = useState(false)
   const [runStats, setRunStats]   = useState<RunStats>(initialRunStats)
@@ -67,6 +70,10 @@ export default function App() {
   useEffect(() => {
     initCustomOpenings().then(setCustomOpenings).catch(() => { /* keep empty */ })
   }, [])
+
+  useEffect(() => {
+    saveEvalSettings({ ownThresholdCp, opponentThresholdCp })
+  }, [ownThresholdCp, opponentThresholdCp])
 
   // Warm any bundled repertoires already in the deck so Start Practice / Run
   // don't stall on a first-time parse.
@@ -256,7 +263,7 @@ export default function App() {
     )
   }
 
-  const navBtns = screen !== 'profile' && screen !== 'explorer' && screen !== 'deck' && screen !== 'editor' && (
+  const navBtns = screen !== 'profile' && screen !== 'explorer' && screen !== 'deck' && screen !== 'editor' && screen !== 'settings' && (
     <div className="nav-btns">
       {!BETA && (
         <button
@@ -277,6 +284,13 @@ export default function App() {
         setScreen('editor')
       }}>Editor</button>
       <button className="nav-btn" onClick={() => setScreen('profile')}>Profile</button>
+      {screen === 'setup' && (
+        <button
+          className="nav-btn"
+          title="Settings"
+          onClick={() => { setSettingsReturnScreen('setup'); setScreen('settings') }}
+        >⚙</button>
+      )}
     </div>
   )
 
@@ -331,6 +345,7 @@ export default function App() {
           setEditorReturnScreen('explorer')
           setScreen('editor')
         }}
+        onOpenSettings={() => { setSettingsReturnScreen('explorer'); setScreen('settings') }}
       />
     )
   }
@@ -379,6 +394,18 @@ export default function App() {
         stats={runStats}
         onRetry={retryRun}
         onBack={() => { setRunMode(false); setScreen('setup') }}
+      />
+    )
+  }
+
+  if (screen === 'settings') {
+    return (
+      <Settings
+        ownThresholdCp={ownThresholdCp}
+        opponentThresholdCp={opponentThresholdCp}
+        onSetOwn={setOwnThresholdCp}
+        onSetOpponent={setOpponentThresholdCp}
+        onBack={() => setScreen(settingsReturnScreen)}
       />
     )
   }
@@ -644,22 +671,13 @@ export default function App() {
             </label>
             {useEvalThresholds && (
               <div className="eval-thresholds-body">
-                <label>
-                  My moves: max <strong>{ownThresholdCp} cp</strong> drop
-                  <input
-                    type="range" min={0} max={100} step={5}
-                    value={ownThresholdCp}
-                    onChange={(e) => setOwnThresholdCp(Number(e.target.value))}
-                  />
-                </label>
-                <label>
-                  Opponent moves: max <strong>{opponentThresholdCp} cp</strong> drop
-                  <input
-                    type="range" min={0} max={200} step={10}
-                    value={opponentThresholdCp}
-                    onChange={(e) => setOpponentThresholdCp(Number(e.target.value))}
-                  />
-                </label>
+                <span>
+                  Thresholds: <strong>{ownThresholdCp} cp</strong> mine ·{' '}
+                  <strong>{opponentThresholdCp} cp</strong> opponent
+                </span>
+                <button className="link-btn" onClick={() => setScreen('settings')}>
+                  Adjust in Settings →
+                </button>
               </div>
             )}
           </div>
