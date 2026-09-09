@@ -959,6 +959,11 @@
   padding-right: 0.08rem;
   user-select: none;
 }
+.move-log-empty {
+  color: #33334a;
+  font-style: italic;
+  user-select: none;
+}
 
 .move-log-san {
   padding: 0.08rem 0.26rem;

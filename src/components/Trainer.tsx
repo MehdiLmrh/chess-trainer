@@ -384,9 +384,11 @@ export function Trainer({
         </div>
       </div>
 
-      {moveSans.length > 0 && (
-        <div className="move-log" ref={moveLogRef}>
-          {moveSans.map((m, i) => (
+      <div className="move-log" ref={moveLogRef}>
+        {moveSans.length === 0 ? (
+          <span className="move-log-empty">Moves will appear here</span>
+        ) : (
+          moveSans.map((m, i) => (
             <span key={i} className="move-log-group">
               {i % 2 === 0 && (
                 <span className="move-log-num">{Math.floor(i / 2) + 1}.</span>
@@ -402,9 +404,9 @@ export function Trainer({
                 {m.san}{m.isUser && m.isBest ? '★' : ''}
               </span>
             </span>
-          ))}
-        </div>
-      )}
+          ))
+        )}
+      </div>
 
       {currentEval !== undefined && (
         <div className="eval-chip" key={reviewIdx}>
