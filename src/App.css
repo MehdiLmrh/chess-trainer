@@ -1238,6 +1238,20 @@
   white-space: nowrap;
 }
 
+.deck-item-srs {
+  font-size: 0.68rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid #383858;
+  border-radius: 10px;
+  color: #8888bb;
+  white-space: nowrap;
+}
+
+.deck-item-srs.due {
+  border-color: #7a5a2a;
+  color: #e0b060;
+}
+
 .deck-remove-btn {
   padding: 0.1rem 0.45rem;
   border: 1px solid #444;

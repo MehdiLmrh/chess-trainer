@@ -25,7 +25,11 @@ export interface MoveQuality {
 interface TrainerCallbacks {
   onCorrect?: (quality: MoveQuality) => void
   onWrong?: () => void
-  onEndOfTheory?: (isPerfect: boolean, variation: string) => void
+  // `mistakes` is the wrong/too-weak count for this line specifically (not the
+  // whole session); `lineKey` identifies the exact line played (side + every
+  // square moved), for spaced-repetition tracking at line granularity rather
+  // than whole-opening granularity.
+  onEndOfTheory?: (isPerfect: boolean, variation: string, mistakes: number, lineKey: string) => void
 }
 
 export interface TrainerConfig {
@@ -197,6 +201,9 @@ export function useTrainer(
   const [fen, setFen] = useState(chess.current.fen())
   const [fenHistory, setFenHistory] = useState<string[]>(() => [chess.current.fen()])
   const [moveHistory, setMoveHistory] = useState<MoveRecord[]>([])
+  // Mirrors moveHistory synchronously so endLine (called mid-callback, before
+  // the next render) can read the just-completed line without stale state.
+  const moveHistoryRef = useRef<MoveRecord[]>([])
   const [feedback, setFeedback] = useState<FeedbackStatus>('idle')
   const [variationName, setVariationName] = useState('')
   const variationNameRef = useRef('')
@@ -228,15 +235,20 @@ export function useTrainer(
   }, [])
 
   const pushRecord = useCallback((rec: MoveRecord) => {
-    setMoveHistory(h => [...h, rec])
+    setMoveHistory(h => {
+      const next = [...h, rec]
+      moveHistoryRef.current = next
+      return next
+    })
   }, [])
 
   const endLine = useCallback((hasMovesBelowThreshold: boolean, variation: string) => {
     setHintMoves([])
     setEndReason(hasMovesBelowThreshold ? 'below-threshold' : 'no-moves')
     setFeedback('end-of-theory')
-    onEndOfTheory?.(sessionWrongsRef.current === 0, variation)
-  }, [onEndOfTheory])
+    const lineKey = (userIsWhite ? 'w:' : 'b:') + moveHistoryRef.current.map(r => r.from + r.to).join('')
+    onEndOfTheory?.(sessionWrongsRef.current === 0, variation, sessionWrongsRef.current, lineKey)
+  }, [onEndOfTheory, userIsWhite])
 
   const playAppMove = useCallback(() => {
     const currentFen = chess.current.fen()
@@ -409,7 +421,11 @@ export function useTrainer(
 
     setFen(newFen)
     setFenHistory(h => h.slice(0, lastUserIdx + 1))
-    setMoveHistory(h => h.slice(0, lastUserIdx))
+    setMoveHistory(h => {
+      const next = h.slice(0, lastUserIdx)
+      moveHistoryRef.current = next
+      return next
+    })
     variationNameRef.current = prevVar
     setVariationName(prevVar)
     setFeedback('idle')

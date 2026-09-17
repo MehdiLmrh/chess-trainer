@@ -1,4 +1,4 @@
-import type { StatsDB } from './stats'
+import { entryWeight, type SrsDB } from './srs'
 
 export type DeckSide = 'white' | 'black' | 'both'
 
@@ -67,11 +67,24 @@ export function setDeckEntrySide(deck: Deck, entry: DeckEntry, side: DeckSide): 
   return next
 }
 
+/** The key spaced-repetition review state is scoped under for a deck entry. */
+export function srsEntryKey(entry: DeckEntry): string {
+  return entry.customId ?? entry.rootName
+}
+
 // Builds a session queue; 'both' entries are expanded into two (one per side).
 // Returned entries always have side resolved to 'white' | 'black'.
+//
+// This is where spaced repetition actually reduces *frequency*, not just
+// order: each entry has a `weight` (0, 1] chance of being included in this
+// lap at all — due/new entries (weight 1) are always in, while entries that
+// have been aced lately roll the dice each lap and increasingly sit it out.
+// The entries that do make the cut are then weighted-shuffled, so due/new
+// ones still tend to come up earlier. Nothing ever drops to a 0% inclusion
+// chance (see the floor in srs.ts), and a lap is never left empty.
 export function buildSessionQueue(
   deck: Deck,
-  stats: StatsDB,
+  srs: SrsDB,
   deckSide: DeckSide = 'black',
 ): DeckEntry[] {
   if (deck.length === 0) return []
@@ -85,8 +98,11 @@ export function buildSessionQueue(
     }
     return [{ ...entry, side: effective }]
   })
-  return [...expanded]
-    .map((entry) => ({ entry, sort: (stats[entry.rootName]?.perfect ?? 0) + Math.random() }))
+  const weighted = expanded.map((entry) => ({ entry, weight: entryWeight(srs, srsEntryKey(entry)) }))
+  const included = weighted.filter(({ weight }) => Math.random() < weight)
+  const pool = included.length > 0 ? included : weighted
+  return pool
+    .map(({ entry, weight }) => ({ entry, sort: Math.random() / weight }))
     .sort((a, b) => a.sort - b.sort)
     .map((e) => e.entry)
 }

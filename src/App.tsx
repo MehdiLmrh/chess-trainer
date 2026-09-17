@@ -9,8 +9,9 @@ import { Settings } from './components/Settings'
 import { loadEvalSettings, saveEvalSettings } from './settings'
 import { loadStats, recordStart, recordCorrect, recordWrong, recordComplete, type StatsDB } from './stats'
 import { loadExclusions, addExclusion, removeExclusion, type ExclusionsDB } from './exclusions'
-import { loadDeck, addToDeck, removeFromDeck, addCustomToDeck, removeCustomFromDeck, buildSessionQueue, setDeckEntrySide, type Deck, type DeckEntry, type DeckSide } from './deck'
+import { loadDeck, addToDeck, removeFromDeck, addCustomToDeck, removeCustomFromDeck, buildSessionQueue, setDeckEntrySide, srsEntryKey, type Deck, type DeckEntry, type DeckSide } from './deck'
 import { initCustomOpenings, getCustomOpenings, saveCustomOpening, type CustomOpening } from './customOpenings'
+import { loadSrs, recordReview, type SrsDB } from './srs'
 import { sound } from './sound'
 import { RunHud, RunSummary } from './components/Run'
 import { initialRunStats, pointsForMove, type RunStats } from './run'
@@ -54,10 +55,12 @@ export default function App() {
   const [runStats, setRunStats]   = useState<RunStats>(initialRunStats)
   const [repLoading, setRepLoading] = useState<string | null>(null)
   const [deckStarting, setDeckStarting] = useState(false)
+  const [srsDB, setSrsDB]         = useState<SrsDB>(loadSrs)
   const lastDrawnRef              = useRef('')
   const sessionQueueRef           = useRef<DeckEntry[]>([])
   const sessionPosRef             = useRef(0)
   const activeDeckRef             = useRef<DeckEntry[]>([])
+  const activeEntryKeyRef         = useRef<string | null>(null)
   const lastRunDeckRef            = useRef<DeckEntry[]>([])
   const inputRef                  = useRef<HTMLInputElement>(null)
 
@@ -168,6 +171,7 @@ export default function App() {
     sessionPosRef.current = pos + 1
     setDeckProgress({ index: pos + 1, total: queue.length })
     lastDrawnRef.current = entry.rootName
+    activeEntryKeyRef.current = srsEntryKey(entry)
     // entry.side is already resolved to 'white' | 'black' by buildSessionQueue
     if (entry.side === 'white' || entry.side === 'black') setSide(entry.side)
     let overrideDB: TheoryDB | null = null
@@ -203,7 +207,7 @@ export default function App() {
     // Eval-guided repertoires in the mix → gate moves by eval for the session.
     if (filtered.some((e) => isRepertoireId(e.customId))) setUseEvalThresholds(true)
     activeDeckRef.current = filtered
-    const queue = buildSessionQueue(filtered, statsDB, deckSide)
+    const queue = buildSessionQueue(filtered, srsDB, deckSide)
     sessionQueueRef.current = queue
     sessionPosRef.current = 0
     advanceSession(queue, 0)
@@ -225,7 +229,7 @@ export default function App() {
     let pos = sessionPosRef.current
     let queue = sessionQueueRef.current
     if (pos >= queue.length) {
-      queue = buildSessionQueue(activeDeckRef.current, statsDB, deckSide)
+      queue = buildSessionQueue(activeDeckRef.current, srsDB, deckSide)
       sessionQueueRef.current = queue
       pos = 0
     }
@@ -356,6 +360,7 @@ export default function App() {
         deck={deck}
         deckSide={deckSide}
         statsDB={statsDB}
+        srs={srsDB}
         onBack={() => setScreen('setup')}
         onRemove={(entry) => setDeck((d) =>
           entry.customId
@@ -450,13 +455,20 @@ export default function App() {
               }
             }
           }}
-          onEndOfTheory={(isPerfect, variation) => {
+          onEndOfTheory={(isPerfect, variation, mistakes, lineKey) => {
             setStatsDB((s) => {
               let next = recordComplete(s, selectedRoot, isPerfect)
               if (variation && variation !== selectedRoot)
                 next = recordComplete(next, variation, isPerfect)
               return next
             })
+            // Spaced repetition only applies to deck practice — it schedules
+            // which deck entries get drawn again, at line granularity so one
+            // perfected line in a big repertoire doesn't quiet the whole entry.
+            if (deckMode && activeEntryKeyRef.current) {
+              const entryKey = activeEntryKeyRef.current
+              setSrsDB((s) => recordReview(s, entryKey, lineKey, mistakes))
+            }
             if (runMode) setRunStats((r) => ({ ...r, openingsCleared: r.openingsCleared + 1 }))
           }}
           onExclude={handleExclude}

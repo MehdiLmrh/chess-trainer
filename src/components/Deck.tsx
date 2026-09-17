@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { Stars } from './Stars'
 import { starLevel } from '../stats'
 import { isRepertoireId } from '../data/repertoires'
+import { entryStatus, type SrsDB } from '../srs'
 import type { StatsDB } from '../stats'
-import type { Deck, DeckEntry, DeckSide } from '../deck'
+import { srsEntryKey, type Deck, type DeckEntry, type DeckSide } from '../deck'
 
 const FILTERS = [
   { label: 'All',       maxPerfect: Infinity },
@@ -21,6 +22,7 @@ interface Props {
   deck: Deck
   deckSide: DeckSide
   statsDB: StatsDB
+  srs: SrsDB
   mainLineOnly: boolean
   onBack: () => void
   onRemove: (entry: DeckEntry) => void
@@ -33,7 +35,7 @@ interface Props {
 }
 
 export function DeckScreen({
-  deck, deckSide, statsDB, mainLineOnly,
+  deck, deckSide, statsDB, srs, mainLineOnly,
   onBack, onRemove, onSetDeckSide, onSetEntrySide, onSetMainLineOnly, onStart, onStartRun,
   starting = false,
 }: Props) {
@@ -102,6 +104,11 @@ export function DeckScreen({
               const excluded = (statsDB[entry.rootName]?.perfect ?? 0) >= maxPerfect
               const key = entry.customId ?? entry.rootName
               const effectiveSide: DeckSide = entry.side ?? deckSide
+              const status = entryStatus(srs, srsEntryKey(entry))
+              const srsLabel =
+                status.linesKnown === 0 ? 'new' :
+                status.linesDue > 0 ? `${status.linesDue} due` :
+                'resting'
               return (
                 <li key={key} className={`deck-item${excluded ? ' deck-item-excluded' : ''}`}>
                   <span className="deck-item-name">{entry.rootName}</span>
@@ -115,6 +122,12 @@ export function DeckScreen({
                       {entry.variations.length} var{entry.variations.length !== 1 ? 's' : ''}
                     </span>
                   )}
+                  <span
+                    className={`deck-item-srs${status.linesDue > 0 ? ' due' : ''}`}
+                    title={`${status.linesKnown} distinct line${status.linesKnown !== 1 ? 's' : ''} tracked for spaced repetition`}
+                  >
+                    🔁 {srsLabel}
+                  </span>
 
                   {/* Per-entry side selector */}
                   <div className="deck-entry-side">
@@ -150,7 +163,8 @@ export function DeckScreen({
           )}
 
           <p className="deck-hint">
-            Openings with fewer perfect runs are drawn more often.
+            Spaced repetition draws due or unexplored lines more often and lets
+            well-practiced ones rest — though never fully skips them.
             Entries set to <strong>±</strong> train as both White and Black.
           </p>
 

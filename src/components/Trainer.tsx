@@ -121,7 +121,7 @@ interface Props {
   evalConfig?: TrainerConfig
   onCorrect: (quality: MoveQuality) => void
   onWrong: () => void
-  onEndOfTheory: (isPerfect: boolean, variation: string) => void
+  onEndOfTheory: (isPerfect: boolean, variation: string, mistakes: number, lineKey: string) => void
   onExclude: (variation: string) => void
   onReset: () => void
   onBack: () => void
