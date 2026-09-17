@@ -103,6 +103,61 @@ type TheoryDB = Record<string, {
 
 ---
 
-## 7. References
+## 7. Spaced Repetition (Deck Practice)
+
+`src/srs.ts` schedules which deck entries get drawn again, biased away from
+lines you've recently been acing — a Leitner-style scheduler.
+
+### Key design decision: per-line, not per-opening
+
+Big repertoire PGNs (hundreds to thousands of positions) make whole-opening
+granularity dangerous: perfecting *one* line through a giant tree must not
+quiet the whole entry — there could be thousands of other lines still
+untouched. So review state is keyed by **the exact line played**, not the
+opening as a whole:
+
+```ts
+type SrsDB = Record<string /* `${entryKey}\0${lineKey}` */, LineCard>
+
+interface LineCard {
+  box: number          // Leitner box (0 = needs practice again soon)
+  dueAt: number         // epoch ms
+  reps: number
+  lastMistakes: number
+}
+```
+- `entryKey` = the deck entry's `customId ?? rootName` (`srsEntryKey()` in `deck.ts`).
+- `lineKey` = side + every square moved along that specific line (computed in
+  `useTrainer.ts`'s `endLine`, from a `moveHistory` ref so it's available
+  synchronously the instant the line ends).
+
+### Grading (`recordReview`)
+Boxes 0‑6 map to review gaps of `[0, 1, 3, 7, 16, 35, 75]` days.
+- **0 mistakes** → promote a box (reviewed further out).
+- **1–2 tiny mistakes** → hold steady (still a success, just not flawless).
+- **3+ mistakes** → back to box 0 (needs review again soon).
+
+### Sampling weight (`entryStatus` / `entryWeight`)
+An entry's draw weight only trusts the average freshness of its *known*
+lines once **≥ 12 distinct lines** are on record (`EXPLORATION_LINES`); below
+that, weight stays close to 1 ("brand new") no matter how well those few
+lines went. Weight never drops below a **0.12 floor** — nothing is ever fully
+retired from rotation.
+
+### Where it plugs in
+- `deck.ts`'s `buildSessionQueue` rerolls each entry's **inclusion** in a lap
+  against its weight (due/new entries always make the cut; well-drilled ones
+  increasingly sit a lap out), then weighted-shuffles what's left. This is
+  genuine frequency reduction, not just reordering.
+- `App.tsx` persists the `SrsDB` to `localStorage`, tracks the active deck
+  entry via a ref, and calls `recordReview` from `onEndOfTheory` — **only**
+  during deck-mode sessions (single-opening training doesn't feed the
+  scheduler).
+- `components/Deck.tsx` shows a small `🔁 new` / `🔁 N due` / `🔁 resting`
+  badge per entry.
+
+---
+
+## 8. References
 - Lichess Openings dataset: https://github.com/lichess-org/chess-openings
 - chess.js: https://github.com/jhlywa/chess.js
